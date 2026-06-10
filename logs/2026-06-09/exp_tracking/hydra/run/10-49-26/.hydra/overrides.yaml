@@ -1,0 +1,5 @@
+- example=tracking
+- trainer.total_timesteps=30000
+- trainer.n_envs=4
+- env.agents.agent.eyes.eye.noise_std=0
+- env.agents.agent.eyes.eye.integration_factor=0
