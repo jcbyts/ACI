@@ -1,0 +1,17 @@
+defaults:
+  - agent
+
+# Point agent with actuated pan/tilt eye(s) -> 4D action space [v, heading, pan, tilt].
+# Identical body to `point`; only the agent instance differs so the eye actuators are
+# appended to the action space.
+instance:
+  _target_: cambrian.agents.MjCambrianAgentPointEye
+  _partial_: true
+
+xml:
+  _target_: cambrian.utils.cambrian_xml.MjCambrianXML.parse
+  _convert_: all
+  xml_string: ${read:${path:${package:},models,agents,point.xml}}
+
+body_name: "${parent:}_body"
+geom_name: "${parent:}_geom"
