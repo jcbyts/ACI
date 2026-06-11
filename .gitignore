@@ -195,3 +195,6 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Training run output (checkpoints, videos, eval npz, compiled env/config)
+logs/

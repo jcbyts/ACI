@@ -166,6 +166,15 @@ class MjCambrianAgent:
 
         self._create_eyes()
 
+        # Eyes may add joints/actuators to the agent body subtree (e.g. an actuated
+        # eye gimbal). _numqpos/_numctrl were computed from the eye-less xml above, but
+        # _parse_actuators/_joints run on the full model at reset, so recompute the
+        # counts from the full agent+eye xml to keep the reset bookkeeping consistent.
+        # For non-actuated (welded) eyes this adds no joints/actuators and is a no-op.
+        full_spec = spec_from_xml_string(self.generate_xml().to_string())
+        self._numqpos = full_spec.model.nq
+        self._numctrl = full_spec.model.nu
+
         assert len(self._config.init_pos) == 3, "init_pos must have 3 elements."
         self._init_pos = self._config.init_pos
         assert len(self._config.init_quat) == 4, "init_quat must have 4 elements."

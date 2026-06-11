@@ -19,6 +19,14 @@ orthographic: False
 noise_std: 0.0
 integration_factor: 0.0
 
+# Actuated eye (pan/tilt gimbal) controls. Default off -> camera welded to body, so
+# every existing task/agent is unchanged. Ranges in degrees; ctrlrange derived in rad.
+actuated: false
+pan_range: [-60, 60]
+tilt_range: [-40, 40]
+actuator_kp: 0.5
+joint_damping: 0.1
+
 renderer:
   render_modes: [rgb_array]
 

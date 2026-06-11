@@ -6,7 +6,11 @@ from typing import Optional, Tuple
 import numpy as np
 from gymnasium import spaces
 
-from cambrian.agents.agent import MjCambrianAgent2D, MjCambrianAgentConfig
+from cambrian.agents.agent import (
+    MjCambrianAgent,
+    MjCambrianAgent2D,
+    MjCambrianAgentConfig,
+)
 from cambrian.envs.maze_env import MjCambrianMazeEnv
 from cambrian.utils import get_logger
 from cambrian.utils.types import ActionType, ObsType
@@ -86,6 +90,101 @@ class MjCambrianAgentPoint(MjCambrianAgent2D):
     def action_space(self) -> spaces.Space:
         """Overrides the base implementation to only have two elements."""
         return spaces.Box(low=-1, high=1, shape=(2,), dtype=np.float32)
+
+
+class MjCambrianAgentPointEye(MjCambrianAgentPoint):
+    """A point agent whose eye(s) are mounted on actuated pan/tilt gimbals, decoupling
+    gaze from locomotion.
+
+    The body is driven exactly like :class:`MjCambrianAgentPoint` (forward velocity +
+    heading -> 3 body actuators). Any *additional* actuators on the agent body -- the
+    eye gimbal's ``*_pan_act`` / ``*_tilt_act`` position servos -- are appended to the
+    action space and commanded as absolute, body-relative angles (position control).
+
+    For a single actuated eye there are 2 extra actuators, giving a 4D action space:
+    ``[forward_velocity, heading, eye_pan, eye_tilt]``.
+
+    Note:
+        The 3 body actuators are always parsed first (they live in the agent xml and the
+        eye actuators are appended afterwards during xml generation), so the eye
+        actuators are simply ``self._actuators[3:]``.
+    """
+
+    # Number of body actuators (x-vel, y-vel, yaw) that precede the eye actuators.
+    _N_BODY_ACTUATORS = 3
+
+    def __init__(self, config: MjCambrianAgentConfig, name: str, *, kp: float = 0.75):
+        super().__init__(config, name, kp=kp)
+
+        # At init, self._actuators only holds the body actuators (the eye actuators are
+        # appended to the full model and only appear in self._actuators after reset).
+        # self._numctrl, however, is computed from the full agent+eye xml, so derive the
+        # eye-actuator count from it.
+        self._n_eye_actuators = self._numctrl - self._N_BODY_ACTUATORS
+        assert self._n_eye_actuators >= 0, (
+            f"Expected at least {self._N_BODY_ACTUATORS} actuators, "
+            f"got {self._numctrl}."
+        )
+        self._last_eye_action = np.zeros(self._n_eye_actuators, dtype=np.float32)
+
+    @property
+    def _eye_actuators(self):
+        """The eye gimbal actuators (everything after the body actuators). Populated
+        after reset, when self._actuators reflects the full model."""
+        return self._actuators[self._N_BODY_ACTUATORS :]
+
+    def apply_action(self, action: ActionType):
+        """Applies a [v, theta, *eye] action.
+
+        The first two elements drive the body (identical to the parent), and the
+        remaining elements set the eye gimbal position actuators directly.
+        """
+        n_eye = self._n_eye_actuators
+        assert len(action) == 2 + n_eye, (
+            f"Action must have {2 + n_eye} elements "
+            f"(2 body + {n_eye} eye), got {len(action)}."
+        )
+
+        # Body: forward velocity + heading -> global vx, vy + yaw position. This mirrors
+        # MjCambrianAgentPoint.apply_action but writes only the 3 body actuators (the
+        # base apply_action zips against all actuators, so the eye ones are left alone
+        # and set explicitly below).
+        v = np.interp(action[0], [-1, 1], self._v_ctrlrange)
+        current_heading = self.qpos[2]
+        vx = v * np.cos(current_heading)
+        vy = v * np.sin(current_heading)
+        MjCambrianAgent.apply_action(self, [vx, vy, action[1]])
+
+        # Eyes: absolute pan/tilt position control. action is normalized [-1, 1].
+        self._last_eye_action = np.asarray(action[2:], dtype=np.float32)
+        for a, actuator in zip(action[2:], self._eye_actuators):
+            if actuator.ctrllimited:
+                a = np.interp(a, [-1, 1], actuator.ctrlrange)
+            self._spec.data.ctrl[actuator.adr] = a
+
+    def _update_obs(self, obs: ObsType) -> ObsType:
+        """Builds the action observation as [v, theta, *eye_commands].
+
+        Bypasses :meth:`MjCambrianAgentPoint._update_obs`, which assumes a 3-element
+        body action; here ``_last_action`` may carry extra eye actuators at reset.
+        """
+        obs = MjCambrianAgent._update_obs(self, obs)
+
+        if self._config.use_action_obs:
+            v, theta = self._calc_v_theta(self._last_action[:3])
+            v = np.interp(v, self._v_ctrlrange, [-1, 1])
+            theta = np.interp(theta, self._theta_ctrlrange, [-1, 1])
+            obs["action"] = np.concatenate(
+                [[v, theta], self._last_eye_action]
+            ).astype(np.float32)
+
+        return obs
+
+    @cached_property
+    def action_space(self) -> spaces.Space:
+        """2 body dims + one dim per eye gimbal actuator."""
+        n = 2 + self._n_eye_actuators
+        return spaces.Box(low=-1, high=1, shape=(n,), dtype=np.float32)
 
 
 class MjCambrianAgentPointSeeker(MjCambrianAgentPoint):

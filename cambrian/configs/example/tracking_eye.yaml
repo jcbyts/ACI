@@ -1,0 +1,22 @@
+# @package _global_
+
+# M2 example: the `tracking` task, but the agent has a single actuated pan/tilt eye
+# (4D action space) instead of the welded multi-eye. Sensors are kept off so this
+# isolates the eye-DOF change from the noise/integration sensor effects.
+
+defaults:
+  - example
+  - override /task: tracking
+
+  # Swap the agent for the actuated-eye variant and give it a single gimballed eye.
+  - override /env/agents@env.agents.agent: point_eye
+  - override /env/agents/eyes@env.agents.agent.eyes.eye: eye_actuated
+
+env:
+  agents:
+    agent:
+      eyes:
+        eye:
+          # Sensors off for M2 (the tracking task turns them on by default).
+          noise_std: 0
+          integration_factor: 0

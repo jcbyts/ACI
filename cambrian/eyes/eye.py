@@ -14,7 +14,11 @@ from scipy.spatial.transform import Rotation as R
 
 from cambrian.renderer import MjCambrianRenderer, MjCambrianRendererConfig
 from cambrian.renderer.overlays import MjCambrianCursor, MjCambrianViewerOverlay
-from cambrian.renderer.render_utils import convert_depth_distances, convert_depth_to_rgb
+from cambrian.renderer.render_utils import (
+    convert_depth_distances,
+    convert_depth_to_rgb,
+    generate_composite,
+)
 from cambrian.utils import MjCambrianGeometry, device, get_logger
 from cambrian.utils.cambrian_xml import MjCambrianXML
 from cambrian.utils.spec import MjCambrianSpec
@@ -53,6 +57,21 @@ class MjCambrianEyeConfig(HydraContainerConfig):
             previous observation, which suppresses noise, adds motion blur during
             movement, and encourages fixation.
 
+        actuated (bool): Whether the eye is mounted on a 2-DOF (pan/tilt) gimbal with
+            position-servo actuators. If True, `generate_xml` builds a small massless
+            gimbal body between the parent body and the camera, adding two hinge joints
+            (pan/azimuth, tilt/elevation) and two position actuators. If False
+            (default), the camera is rigidly welded to the parent body as before, so
+            every existing task/agent is unchanged.
+        pan_range (Tuple[float, float]): The pan (azimuth) joint range in DEGREES.
+            Only used when `actuated` is True.
+        tilt_range (Tuple[float, float]): The tilt (elevation) joint range in DEGREES.
+            Only used when `actuated` is True.
+        actuator_kp (float): The position-servo stiffness (kp) for the pan/tilt
+            actuators. Only used when `actuated` is True.
+        joint_damping (float): The damping applied to the pan/tilt hinge joints.
+            Only used when `actuated` is True.
+
         renderer (MjCambrianRendererConfig): The renderer config to use for the
             underlying renderer.
     """
@@ -68,6 +87,12 @@ class MjCambrianEyeConfig(HydraContainerConfig):
 
     noise_std: float
     integration_factor: float
+
+    actuated: bool
+    pan_range: Tuple[float, float]
+    tilt_range: Tuple[float, float]
+    actuator_kp: float
+    joint_damping: float
 
     renderer: MjCambrianRendererConfig
 
@@ -166,20 +191,108 @@ class MjCambrianEye:
         resolution = [1, 1]
         if self._renderer is not None:
             resolution = [self._renderer.config.width, self._renderer.config.height]
-        xml.add(
-            parent,
-            "camera",
+
+        camera_kwargs = dict(
             name=self._name,
             mode="fixed",
-            pos=" ".join(map(str, pos)),
-            quat=" ".join(map(str, quat)),
             focal=" ".join(map(str, self._config.focal)),
             sensorsize=" ".join(map(str, self._config.sensorsize)),
             resolution=" ".join(map(str, resolution)),
             orthographic=str(self._config.orthographic).lower(),
         )
 
+        if not self._config.actuated:
+            # Default behaviour: the camera is rigidly welded to the parent body. The
+            # base pos/quat (aim) are baked directly onto the camera.
+            xml.add(
+                parent,
+                "camera",
+                pos=" ".join(map(str, pos)),
+                quat=" ".join(map(str, quat)),
+                **camera_kwargs,
+            )
+            return xml
+
+        # Actuated eye: mount the camera on a 2-DOF pan/tilt gimbal. The base
+        # pos/quat (aim) move to the outer mount body; the camera sits at the inner
+        # link origin (identity), so with both joints at 0 the view matches the
+        # welded camera exactly. Pan rotates about the mount-local up axis (+y) and
+        # tilt about the link-local right axis (+x) -- verify signs empirically.
+        self._add_gimbal_camera(xml, parent, pos, quat, camera_kwargs)
+
         return xml
+
+    def _add_gimbal_camera(self, xml, parent, pos, quat, camera_kwargs):
+        """Build the 2-DOF gimbal body tree and the pan/tilt position actuators.
+
+        MuJoCo needs non-degenerate inertia on any body that carries a joint, so each
+        gimbal body gets a tiny explicit ``<inertial>`` (the massless-body trap). Joint
+        ``range`` is in degrees (compiler ``angle="degree"``) while the position-servo
+        ``ctrlrange`` is in radians, matching the hinge qpos target convention used by
+        the existing yaw actuator.
+        """
+        cfg = self._config
+        # Tiny but non-degenerate inertia so the jointed bodies compile and stay stable.
+        inertial = dict(pos="0 0 0", mass="1e-3", diaginertia="1e-4 1e-4 1e-4")
+
+        # Outer (pan) body carries the base aim of the eye.
+        mount = xml.add(
+            parent,
+            "body",
+            name=f"{self._name}_mount",
+            pos=" ".join(map(str, pos)),
+            quat=" ".join(map(str, quat)),
+        )
+        xml.add(mount, "inertial", **inertial)
+        xml.add(
+            mount,
+            "joint",
+            name=f"{self._name}_pan",
+            type="hinge",
+            axis="0 1 0",
+            range=" ".join(map(str, cfg.pan_range)),
+            damping=str(cfg.joint_damping),
+            limited="true",
+        )
+
+        # Inner (tilt) body holds the camera.
+        link = xml.add(mount, "body", name=f"{self._name}_tilt_link", pos="0 0 0")
+        xml.add(link, "inertial", **inertial)
+        xml.add(
+            link,
+            "joint",
+            name=f"{self._name}_tilt",
+            type="hinge",
+            axis="1 0 0",
+            range=" ".join(map(str, cfg.tilt_range)),
+            damping=str(cfg.joint_damping),
+            limited="true",
+        )
+        xml.add(link, "camera", pos="0 0 0", **camera_kwargs)
+
+        # Position servos. ctrlrange is in radians (hinge qpos target), so convert the
+        # degree ranges above.
+        pan_ctrl = np.deg2rad(cfg.pan_range)
+        tilt_ctrl = np.deg2rad(cfg.tilt_range)
+        actuator = xml.add(xml.root, "actuator")
+        xml.add(
+            actuator,
+            "position",
+            name=f"{self._name}_pan_act",
+            joint=f"{self._name}_pan",
+            ctrlrange=" ".join(map(str, pan_ctrl)),
+            ctrllimited="true",
+            kp=str(cfg.actuator_kp),
+        )
+        xml.add(
+            actuator,
+            "position",
+            name=f"{self._name}_tilt_act",
+            joint=f"{self._name}_tilt",
+            ctrlrange=" ".join(map(str, tilt_ctrl)),
+            ctrllimited="true",
+            kp=str(cfg.actuator_kp),
+        )
 
     def _calculate_pos_quat(
         self, geom: MjCambrianGeometry, coord: Tuple[float, float]
@@ -329,7 +442,15 @@ class MjCambrianEye:
                 znear=0,
                 zfar=self._spec.model.stat.extent,
             )
-        image = self._prev_obs
+        else:
+            image = self._prev_obs
+
+        # Composite (single-element) so the panel gets the red border and the [0, 255]
+        # pixel scaling that `mjr_drawPixels` expects -- identical to the multi-eye
+        # path. Passing the raw [0, 1] observation draws as near-black, which made the
+        # actuated single-eye agent's POV inset appear absent in eval videos.
+        lat, lon = self._config.coord
+        image = generate_composite({lat: {lon: image}}) * 255.0
 
         position = MjCambrianCursor.Position.BOTTOM_LEFT
         layer = MjCambrianCursor.Layer.BACK
