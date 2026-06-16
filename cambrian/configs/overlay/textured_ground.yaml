@@ -1,0 +1,9 @@
+# @package _global_
+
+# Adds a procedural checker texture to the floor plane. This gives moving/actuated
+# eyes richer optic-flow cues without changing maze geometry or object textures.
+env:
+  mazes:
+    maze:
+      floor_texture: checker
+      floor_texrepeat: [10, 10]

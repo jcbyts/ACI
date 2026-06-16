@@ -23,11 +23,19 @@ _single_eye:
   sensorsize: ${..sensorsize}
   resolution: ${..resolution}
   coord: ${..coord}
+  gaze_coord: ${..gaze_coord}
   orthographic: ${..orthographic}
 
   # Sensor realism parameters - propagate to individual eyes
-  noise_std: ${..single_eye.noise_std}
-  integration_factor: ${..single_eye.integration_factor}
+  noise_std: ${..noise_std}
+  integration_factor: ${..integration_factor}
+
+  # Actuated-eye controls - propagate to individual eyes
+  actuated: ${..actuated}
+  pan_range: ${..pan_range}
+  tilt_range: ${..tilt_range}
+  actuator_kp: ${..actuator_kp}
+  joint_damping: ${..joint_damping}
 
   renderer:
     width: ${..resolution.1}
@@ -38,10 +46,13 @@ focal: ${.single_eye.focal}
 sensorsize: ${.single_eye.sensorsize}
 resolution: ${.single_eye.resolution}
 coord: ${.single_eye.coord}
+gaze_coord: null
 orthographic: ${.single_eye.orthographic}
 
 lat_range: [-5, 5]
 lon_range: [-90, 90]
+gaze_lat_range: ${.lat_range}
+gaze_lon_range: ${.lon_range}
 num_eyes: [1, 1]
 
 flatten_observations: False

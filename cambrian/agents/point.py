@@ -11,7 +11,7 @@ from cambrian.agents.agent import (
     MjCambrianAgent2D,
     MjCambrianAgentConfig,
 )
-from cambrian.envs.maze_env import MjCambrianMazeEnv
+from cambrian.envs.maze_env import MjCambrianMapEntity, MjCambrianMazeEnv
 from cambrian.utils import get_logger
 from cambrian.utils.types import ActionType, ObsType
 
@@ -77,14 +77,17 @@ class MjCambrianAgentPoint(MjCambrianAgent2D):
     def apply_action(self, action: ActionType):
         """Calls the appropriate apply action method based on the heading joint type."""
         assert len(action) == 2, f"Action must have two elements, got {len(action)}."
+        super().apply_action(self._body_ctrl_from_action(action))
 
+    def _body_ctrl_from_action(self, action: ActionType) -> ActionType:
+        """Map [forward_velocity, heading] to the underlying body actuators."""
         # Calculate global velocities
         v = np.interp(action[0], [-1, 1], self._v_ctrlrange)
         current_heading = self.qpos[2]
         vx = v * np.cos(current_heading)
         vy = v * np.sin(current_heading)
 
-        super().apply_action([vx, vy, action[1]])
+        return [vx, vy, action[1]]
 
     @cached_property
     def action_space(self) -> spaces.Space:
@@ -125,6 +128,16 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
             f"Expected at least {self._N_BODY_ACTUATORS} actuators, "
             f"got {self._numctrl}."
         )
+        self._eye_action_mode = self._config.eye_action_mode
+        assert self._eye_action_mode in {"independent", "binocular"}, (
+            "eye_action_mode must be 'independent' or 'binocular', "
+            f"got '{self._eye_action_mode}'."
+        )
+        if self._eye_action_mode == "binocular":
+            assert self._n_eye_actuators == 4, (
+                "binocular eye_action_mode requires exactly two pan/tilt eyes "
+                f"(4 eye actuators), got {self._n_eye_actuators}."
+            )
         self._last_eye_action = np.zeros(self._n_eye_actuators, dtype=np.float32)
 
     @property
@@ -145,22 +158,42 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
             f"(2 body + {n_eye} eye), got {len(action)}."
         )
 
-        # Body: forward velocity + heading -> global vx, vy + yaw position. This mirrors
-        # MjCambrianAgentPoint.apply_action but writes only the 3 body actuators (the
-        # base apply_action zips against all actuators, so the eye ones are left alone
-        # and set explicitly below).
-        v = np.interp(action[0], [-1, 1], self._v_ctrlrange)
-        current_heading = self.qpos[2]
-        vx = v * np.cos(current_heading)
-        vy = v * np.sin(current_heading)
-        MjCambrianAgent.apply_action(self, [vx, vy, action[1]])
+        # Body: forward velocity + heading -> global vx, vy + yaw position. Use the
+        # same body-control helper as the non-eye point agent, but write only the body
+        # actuators so the eye actuators can be set explicitly below.
+        MjCambrianAgent.apply_action(self, self._body_ctrl_from_action(action[:2]))
 
         # Eyes: absolute pan/tilt position control. action is normalized [-1, 1].
         self._last_eye_action = np.asarray(action[2:], dtype=np.float32)
-        for a, actuator in zip(action[2:], self._eye_actuators):
+        eye_ctrl = self._map_eye_action(self._last_eye_action)
+        for a, actuator in zip(eye_ctrl, self._eye_actuators):
             if actuator.ctrllimited:
                 a = np.interp(a, [-1, 1], actuator.ctrlrange)
             self._spec.data.ctrl[actuator.adr] = a
+
+    def _map_eye_action(self, eye_action: np.ndarray) -> np.ndarray:
+        """Map policy eye coordinates to physical pan/tilt actuator commands.
+
+        independent: [left_pan, left_tilt, right_pan, right_tilt]
+        binocular: [pan_version, pan_vergence, tilt_version, tilt_vergence]
+        """
+        if self._eye_action_mode == "independent" or eye_action.size == 0:
+            return eye_action
+
+        pan_version, pan_vergence, tilt_version, tilt_vergence = eye_action
+        return np.clip(
+            np.array(
+                [
+                    pan_version + 0.5 * pan_vergence,
+                    tilt_version + 0.5 * tilt_vergence,
+                    pan_version - 0.5 * pan_vergence,
+                    tilt_version - 0.5 * tilt_vergence,
+                ],
+                dtype=np.float32,
+            ),
+            -1.0,
+            1.0,
+        )
 
     def _update_obs(self, obs: ObsType) -> ObsType:
         """Builds the action observation as [v, theta, *eye_commands].
@@ -187,6 +220,60 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
         return spaces.Box(low=-1, high=1, shape=(n,), dtype=np.float32)
 
 
+class MjCambrianAgentPointRelative(MjCambrianAgentPoint):
+    """Point agent whose heading action is interpreted relative to current heading."""
+
+    def __init__(
+        self,
+        config: MjCambrianAgentConfig,
+        name: str,
+        *,
+        kp: float = 0.75,
+        max_relative_heading: float = 0.5,
+    ):
+        super().__init__(config, name, kp=kp)
+        self._max_relative_heading = max_relative_heading
+
+    def _body_ctrl_from_action(self, action: ActionType) -> ActionType:
+        v = np.interp(action[0], [-1, 1], self._v_ctrlrange)
+        current_heading = self.qpos[2]
+        vx = v * np.cos(current_heading)
+        vy = v * np.sin(current_heading)
+
+        heading_delta = float(action[1]) * self._max_relative_heading
+        target_heading = current_heading + heading_delta
+        target_heading = (target_heading + np.pi) % (2 * np.pi) - np.pi
+        heading_action = np.interp(target_heading, self._theta_ctrlrange, [-1, 1])
+        return [vx, vy, heading_action]
+
+
+class MjCambrianAgentPointRelativeEye(MjCambrianAgentPointEye):
+    """Actuated-eye point agent with relative body heading control."""
+
+    def __init__(
+        self,
+        config: MjCambrianAgentConfig,
+        name: str,
+        *,
+        kp: float = 0.75,
+        max_relative_heading: float = 0.5,
+    ):
+        super().__init__(config, name, kp=kp)
+        self._max_relative_heading = max_relative_heading
+
+    def _body_ctrl_from_action(self, action: ActionType) -> ActionType:
+        v = np.interp(action[0], [-1, 1], self._v_ctrlrange)
+        current_heading = self.qpos[2]
+        vx = v * np.cos(current_heading)
+        vy = v * np.sin(current_heading)
+
+        heading_delta = float(action[1]) * self._max_relative_heading
+        target_heading = current_heading + heading_delta
+        target_heading = (target_heading + np.pi) % (2 * np.pi) - np.pi
+        heading_action = np.interp(target_heading, self._theta_ctrlrange, [-1, 1])
+        return [vx, vy, heading_action]
+
+
 class MjCambrianAgentPointSeeker(MjCambrianAgentPoint):
     """This is an agent which is non-trainable and defines a custom policy which
     acts as a 'homing' agent in the maze environment. This agent will attempt to reach
@@ -203,6 +290,10 @@ class MjCambrianAgentPointSeeker(MjCambrianAgentPoint):
             consider itself to have reached the target. Defaults to 2.0.
         use_optimal_trajectory (bool): Whether to use the optimal trajectory to the
             target. Defaults to False.
+        random_target_locations (str): Which maze cells can be sampled as random
+            waypoints when target is None. "empty" preserves the old behavior of only
+            sampling literal 0 cells; "free" samples all non-wall cells, including
+            reset cells; "reset" samples from this agent's reset region.
     """
 
     def __init__(
@@ -214,12 +305,18 @@ class MjCambrianAgentPointSeeker(MjCambrianAgentPoint):
         speed: float = -0.75,
         distance_threshold: float = 2.0,
         use_optimal_trajectory: bool = False,
+        random_target_locations: str = "empty",
     ):
         super().__init__(config, name)
 
         self._target = target
         self._speed = speed
         self._distance_threshold = distance_threshold
+        assert random_target_locations in {"empty", "free", "reset"}, (
+            "random_target_locations must be 'empty', 'free', or 'reset', "
+            f"got '{random_target_locations}'."
+        )
+        self._random_target_locations = random_target_locations
 
         self._optimal_trajectory: np.ndarray = None
         self._use_optimal_trajectory = use_optimal_trajectory
@@ -235,12 +332,25 @@ class MjCambrianAgentPointSeeker(MjCambrianAgentPoint):
     def get_action_privileged(self, env: MjCambrianMazeEnv) -> ActionType:
         if self._target is None:
             if self._optimal_trajectory is None or len(self._optimal_trajectory) == 0:
-                # Generate a random position to navigate to
-                # Chooses one of the empty spaces in the maze
-                rows, cols = np.where(env.maze.map == "0")
-                assert rows.size > 0, "No empty spaces in the maze"
-                index = np.random.randint(rows.size)
-                target_pos = env.maze.rowcol_to_xy((rows[index], cols[index]))
+                # Generate a random position to navigate to.
+                if self._random_target_locations == "empty":
+                    # Historical behavior: choose only literal empty cells.
+                    rows, cols = np.where(env.maze.map == "0")
+                    assert rows.size > 0, "No empty spaces in the maze"
+                    index = np.random.randint(rows.size)
+                    target_pos = env.maze.rowcol_to_xy((rows[index], cols[index]))
+                elif self._random_target_locations == "free":
+                    free = np.vectorize(
+                        lambda cell: MjCambrianMapEntity.parse(str(cell))[0]
+                        != MjCambrianMapEntity.WALL
+                    )(env.maze.map)
+                    rows, cols = np.where(free)
+                    assert rows.size > 0, "No free spaces in the maze"
+                    index = np.random.randint(rows.size)
+                    target_pos = env.maze.rowcol_to_xy((rows[index], cols[index]))
+                else:
+                    locations = env.maze.reset_locations_for_agent(self.name)
+                    target_pos = locations[np.random.randint(len(locations))]
             else:
                 target_pos = self._optimal_trajectory[0]
         else:

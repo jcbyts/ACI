@@ -1,0 +1,67 @@
+# @package _global_
+
+# Simple first-pass tracking reward:
+#   +10 * goal_capture - 20 * adversary_hit + 1.0 * delta_toward_goal
+# Objects respawn on capture/hit and episodes continue until the step limit.
+env:
+  mazes:
+    maze:
+      floor_texture: checker
+      floor_texrepeat: [10, 10]
+
+  step_fn:
+    respawn_objects_if_agent_close:
+      _target_: cambrian.envs.step_fns.step_respawn_agents_if_close_to_agents
+      _partial_: true
+      for_agents: ${glob:goal*|adversary*,${oc.dict.keys:env.agents}}
+      to_agents: ${glob:agent*,${oc.dict.keys:env.agents}}
+      distance_threshold: 1.0
+
+  reward_fn:
+    reward_if_done:
+      disable: true
+
+    # The existing contact reward function does not currently honor disable kwargs,
+    # so set the scalar to zero to keep this reward exactly focused.
+    penalize_if_has_contacts:
+      reward: 0.0
+
+    approach_goal:
+      _target_: cambrian.envs.reward_fns.reward_fn_euclidean_delta_to_agent
+      _partial_: true
+      reward: 1.0
+      to_agents: ${glob:goal*,${oc.dict.keys:env.agents}}
+      for_agents: ${glob:agent*,${oc.dict.keys:env.agents}}
+
+    reward_if_goal_respawned:
+      _target_: cambrian.envs.reward_fns.reward_fn_agent_respawned
+      _partial_: true
+      reward: 10.0
+      for_agents: ${glob:goal*,${oc.dict.keys:env.agents}}
+
+    penalize_if_adversary_respawned:
+      _target_: cambrian.envs.reward_fns.reward_fn_agent_respawned
+      _partial_: true
+      reward: -20.0
+      for_agents: ${glob:adversary*,${oc.dict.keys:env.agents}}
+
+  truncation_fn:
+    truncate_if_close_to_adversary:
+      disable: true
+
+  termination_fn:
+    terminate_if_close_to_goal:
+      disable: true
+
+eval_env:
+  reward_fn:
+    reward_if_done:
+      disable: true
+    penalize_if_has_contacts:
+      reward: 0.0
+    approach_goal:
+      disable: true
+    reward_if_goal_respawned:
+      scale_by_quickness: false
+    penalize_if_adversary_respawned:
+      scale_by_quickness: false

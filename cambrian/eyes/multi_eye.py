@@ -38,6 +38,10 @@ class MjCambrianMultiEyeConfig(MjCambrianEyeConfig):
             used to determine the placement of the eye on the agent. Specified in
             degrees. This is the longitudinal/horizontal range of the evenly placed eye
             about the agent's bounding sphere.
+        gaze_lat_range (Optional[Tuple[float, float]]): Optional latitudinal range
+            for the generated eyes' optical axes. Defaults to `lat_range`.
+        gaze_lon_range (Optional[Tuple[float, float]]): Optional longitudinal range
+            for the generated eyes' optical axes. Defaults to `lon_range`.
         num_eyes (Optional[Tuple[int, int]]): The num of eyes to generate.
             If this is specified, then the eyes will be generated on a spherical
             grid. The first element is the number of eyes to generate latitudinally and
@@ -64,6 +68,8 @@ class MjCambrianMultiEyeConfig(MjCambrianEyeConfig):
 
     lat_range: Tuple[float, float]
     lon_range: Tuple[float, float]
+    gaze_lat_range: Tuple[float, float]
+    gaze_lon_range: Tuple[float, float]
     num_eyes: Tuple[int, int]
 
     flatten_observations: bool
@@ -97,12 +103,34 @@ class MjCambrianMultiEye(MjCambrianEye):
         nlat, nlon = self._config.num_eyes
         lat_bins = generate_sequence_from_range(self._config.lat_range, nlat)
         lon_bins = generate_sequence_from_range(self._config.lon_range, nlon)
+        gaze_lat_bins = generate_sequence_from_range(self._config.gaze_lat_range, nlat)
+        gaze_lon_bins = generate_sequence_from_range(self._config.gaze_lon_range, nlon)
         for lat_idx, lat in enumerate(lat_bins):
             for lon_idx, lon in enumerate(lon_bins):
                 eye_name = f"{self._name}_{lat_idx}_{lon_idx}"
                 eye_config = self._config._single_eye.copy()
+                for attr in (
+                    "fov",
+                    "focal",
+                    "sensorsize",
+                    "resolution",
+                    "orthographic",
+                    "noise_std",
+                    "integration_factor",
+                    "actuated",
+                    "pan_range",
+                    "tilt_range",
+                    "actuator_kp",
+                    "joint_damping",
+                    "renderer",
+                ):
+                    setattr(eye_config, attr, getattr(self._config, attr))
                 # Update the eye's coord to the current lat, lon
                 eye_config.coord = [lat, lon]
+                eye_config.gaze_coord = [
+                    gaze_lat_bins[lat_idx],
+                    gaze_lon_bins[lon_idx],
+                ]
                 # Create the eye instance
                 eye = eye_config.instance(eye_config, eye_name)
                 self._eyes[eye_name] = eye
@@ -111,7 +139,7 @@ class MjCambrianMultiEye(MjCambrianEye):
         self, parent_xml: MjCambrianXML, geom: MjCambrianGeometry, parent_body_name: str
     ) -> MjCambrianXML:
         """Generate the XML for all eyes."""
-        xml = super().generate_xml(parent_xml, geom, parent_body_name)
+        xml = MjCambrianXML.make_empty()
         for eye in self._eyes.values():
             eye_xml = eye.generate_xml(parent_xml, geom, parent_body_name)
             xml += eye_xml

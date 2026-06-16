@@ -1,0 +1,43 @@
+# @package _global_
+
+# Train with the same respawn-based tracking loop used at evaluation time. This gives
+# dense goal/adversary feedback across each episode while preserving the checker floor.
+env:
+  mazes:
+    maze:
+      floor_texture: checker
+      floor_texrepeat: [10, 10]
+
+  step_fn:
+    respawn_objects_if_agent_close:
+      _target_: cambrian.envs.step_fns.step_respawn_agents_if_close_to_agents
+      _partial_: true
+      for_agents: ${glob:goal*|adversary*,${oc.dict.keys:env.agents}}
+      to_agents: ${glob:agent*,${oc.dict.keys:env.agents}}
+      distance_threshold: 1.0
+
+  reward_fn:
+    reward_if_goal_respawned:
+      _target_: cambrian.envs.reward_fns.reward_fn_agent_respawned
+      _partial_: true
+      reward: 10.0
+      for_agents: ${glob:goal*,${oc.dict.keys:env.agents}}
+      scale_by_quickness: true
+
+    penalize_if_adversary_respawned:
+      _target_: cambrian.envs.reward_fns.reward_fn_agent_respawned
+      _partial_: true
+      reward: -20.0
+      for_agents: ${glob:adversary*,${oc.dict.keys:env.agents}}
+      scale_by_quickness: true
+
+    penalize_if_has_contacts:
+      reward: -2.0
+
+  truncation_fn:
+    truncate_if_close_to_adversary:
+      disable: true
+
+  termination_fn:
+    terminate_if_close_to_goal:
+      disable: true

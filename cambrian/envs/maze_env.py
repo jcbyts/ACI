@@ -91,6 +91,10 @@ class MjCambrianMazeConfig(HydraContainerConfig):
             length 1, only one texture will be used. A length >= 1 is required.
             The keyword "default" is required for walls denoted simply as 1 or W.
             Other walls are specified as 1/W:<texture id>.
+        floor_texture (Optional[str]): Optional texture for the floor plane. If set to
+            "checker", a procedural checker texture is used. Otherwise the value is
+            treated as an asset file path relative to the MuJoCo assetdir.
+        floor_texrepeat (Tuple[float, float]): Texture repeat for the floor material.
         agent_id_map (Dict[str, List[str]]): The mapping from agent id to agent
             names. Agents in the list are chosen at random. If the list is of length 1,
             only one agent will be used. A length >= 1 is required for each agent name.
@@ -113,6 +117,8 @@ class MjCambrianMazeConfig(HydraContainerConfig):
     rotation: float
 
     wall_texture_map: Dict[str, List[str]]
+    floor_texture: Optional[str] = None
+    floor_texrepeat: Tuple[float, float] = (8, 8)
     agent_id_map: Dict[str, List[str]]
 
     enabled: bool
@@ -335,12 +341,47 @@ class MjCambrianMaze:
         floor_name = f"floor_{self._name}"
         floor = xml.find(f".//geom[@name='{floor_name}']")
         assert floor is not None, f"`{floor_name}` not found"
+        if getattr(self._config, "floor_texture", None):
+            self._add_floor_texture(xml, assets, floor)
         if floor.attrib.get("size", "0 0 0"):
             size = f"{self.map_width_scaled // 2} {self.map_length_scaled // 2} 0.1"
             floor.attrib["size"] = size
         floor.attrib["pos"] = " ".join(map(str, [-self._starting_x, 0, -0.05]))
 
         return xml
+
+    def _add_floor_texture(self, xml: MjCambrianXML, assets: Any, floor: Any):
+        """Attach a textured material to the floor plane."""
+        texture_name = f"floor_{self._name}_tex"
+        material_name = f"floor_{self._name}_textured_mat"
+        texture = self._config.floor_texture
+        texrepeat = getattr(self._config, "floor_texrepeat", (8, 8))
+
+        texture_kwargs = dict(name=texture_name, type="2d")
+        if texture == "checker":
+            texture_kwargs.update(
+                builtin="checker",
+                rgb1="0.08 0.08 0.08",
+                rgb2="0.65 0.65 0.65",
+                width="256",
+                height="256",
+            )
+        else:
+            texture_kwargs["file"] = texture
+
+        xml.add(assets, "texture", **texture_kwargs)
+        xml.add(
+            assets,
+            "material",
+            name=material_name,
+            texture=texture_name,
+            texrepeat=" ".join(map(str, texrepeat)),
+            texuniform="true",
+            rgba="1 1 1 1",
+            shininess="0.0",
+            specular="0.0",
+        )
+        floor.attrib["material"] = material_name
 
     def reset(self, spec: MjCambrianSpec, *, reset_occupied: bool = True):
         """Resets the maze. Will reset the wall textures and reset the occupied
@@ -523,6 +564,16 @@ class MjCambrianMaze:
             self._agent_locations[agent] = len(self._occupied_locations)
             self._occupied_locations.append(pos)
         return pos
+
+    def reset_locations_for_agent(self, agent: str) -> List[np.ndarray]:
+        """Returns reset locations available to an agent without reserving one."""
+        reset_locations = []
+        for reset_agent, reset_pos in zip(self._reset_agents, self._reset_locations):
+            if agent in self._agent_id_map[reset_agent]:
+                reset_locations.append(reset_pos.copy())
+        if len(reset_locations) == 0:
+            raise ValueError(f"No reset locations found for agent '{agent}'.")
+        return reset_locations
 
     # ==================
 

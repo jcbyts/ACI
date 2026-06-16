@@ -79,6 +79,34 @@ def done_if_close_to_agents(
     return False
 
 
+def done_if_outside_maze_bounds(
+    env: MjCambrianEnv,
+    agent: MjCambrianAgent,
+    info: Dict[str, Any],
+    *,
+    for_agents: Optional[List[str]] = None,
+    margin: float = 0.0,
+    disable: bool = False,
+) -> bool:
+    """Done if an agent leaves the current maze's floor extent."""
+    if not agent_selected(agent, for_agents) or disable:
+        return False
+
+    maze = getattr(env, "maze", None)
+    if maze is None:
+        return False
+
+    half_w = maze.map_width_scaled / 2.0 + margin
+    half_h = maze.map_length_scaled / 2.0 + margin
+    center_x = -float(getattr(maze, "_starting_x", 0.0))
+    x, y = agent.pos[:2]
+
+    return not (
+        center_x - half_w <= x <= center_x + half_w
+        and -half_h <= y <= half_h
+    )
+
+
 def done_combined(
     env: MjCambrianEnv,
     agent: MjCambrianAgent,

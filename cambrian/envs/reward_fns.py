@@ -162,6 +162,76 @@ def reward_fn_euclidean_delta_to_agent(
     return apply_reward_fn(env, agent, reward_fn=calc_deltas, **kwargs)
 
 
+def reward_fn_heading_to_agent(
+    env: MjCambrianEnv,
+    agent: MjCambrianAgent,
+    terminated: bool,
+    truncated: bool,
+    info: Dict[str, Any],
+    *,
+    reward: float,
+    to_agents: Optional[List[str]] = None,
+    **kwargs,
+) -> float:
+    """Rewards facing selected agents in the 2D plane."""
+
+    def calc_alignment() -> float:
+        accumulated_reward = 0.0
+        heading = agent.qpos[2]
+        forward = np.array([np.cos(heading), np.sin(heading)])
+        for other_agent in env.agents.values():
+            if not agent_selected(other_agent, to_agents):
+                continue
+
+            delta = other_agent.pos[:2] - agent.pos[:2]
+            norm = np.linalg.norm(delta)
+            if norm == 0:
+                continue
+            accumulated_reward += reward * np.dot(forward, delta / norm)
+        return accumulated_reward
+
+    return apply_reward_fn(env, agent, reward_fn=calc_alignment, **kwargs)
+
+
+def reward_fn_action_heading_to_agent(
+    env: MjCambrianEnv,
+    agent: MjCambrianAgent,
+    terminated: bool,
+    truncated: bool,
+    info: Dict[str, Any],
+    *,
+    reward: float,
+    to_agents: Optional[List[str]] = None,
+    action_index: int = 1,
+    max_angle: float = np.pi / 2,
+    **kwargs,
+) -> float:
+    """Rewards steering actions that turn toward selected agents."""
+
+    def calc_action_alignment() -> float:
+        action = info.get("action")
+        if action is None or len(action) <= action_index:
+            return 0.0
+
+        accumulated_reward = 0.0
+        for other_agent in env.agents.values():
+            if not agent_selected(other_agent, to_agents):
+                continue
+
+            delta = other_agent.pos[:2] - agent.pos[:2]
+            if np.linalg.norm(delta) == 0:
+                continue
+
+            target_heading = np.arctan2(delta[1], delta[0])
+            heading_error = target_heading - agent.qpos[2]
+            heading_error = (heading_error + np.pi) % (2 * np.pi) - np.pi
+            desired_turn = np.clip(heading_error / max_angle, -1.0, 1.0)
+            accumulated_reward += reward * float(action[action_index]) * desired_turn
+        return accumulated_reward
+
+    return apply_reward_fn(env, agent, reward_fn=calc_action_alignment, **kwargs)
+
+
 def reward_fn_agent_respawned(
     env: MjCambrianEnv,
     agent: MjCambrianAgent,
@@ -243,6 +313,7 @@ def reward_fn_has_contacts(
         env,
         agent,
         reward_fn=lambda: reward if info.get("has_contacts", False) else 0.0,
+        **kwargs,
     )
 
 

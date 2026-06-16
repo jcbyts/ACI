@@ -1,0 +1,3 @@
+defaults:
+  - small_cnn
+  - shared

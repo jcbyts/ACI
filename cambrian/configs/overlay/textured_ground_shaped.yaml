@@ -1,0 +1,31 @@
+# @package _global_
+
+# Adds a checker floor and dense training-only distance shaping. Evaluation keeps the
+# original tracking respawn reward so shaped runs can be compared to sparse baselines.
+env:
+  mazes:
+    maze:
+      floor_texture: checker
+      floor_texrepeat: [10, 10]
+
+  reward_fn:
+    approach_goal:
+      _target_: cambrian.envs.reward_fns.reward_fn_euclidean_delta_to_agent
+      _partial_: true
+      reward: 2.0
+      to_agents: ${glob:goal*,${oc.dict.keys:env.agents}}
+      for_agents: ${glob:agent*,${oc.dict.keys:env.agents}}
+
+    avoid_adversary:
+      _target_: cambrian.envs.reward_fns.reward_fn_euclidean_delta_to_agent
+      _partial_: true
+      reward: -1.0
+      to_agents: ${glob:adversary*,${oc.dict.keys:env.agents}}
+      for_agents: ${glob:agent*,${oc.dict.keys:env.agents}}
+
+eval_env:
+  reward_fn:
+    approach_goal:
+      disable: true
+    avoid_adversary:
+      disable: true

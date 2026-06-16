@@ -48,6 +48,10 @@ class MjCambrianEyeConfig(HydraContainerConfig):
             Specified in degrees. This attr isn't actually used by eye, but by the
             agent. The eye has no knowledge of the geometry it's trying to be placed
             on. Fmt: lat lon
+        gaze_coord (Optional[Tuple[float, float]]): Optional aim coordinate for the
+            optical axis, specified as lat lon in degrees. If unset, the eye aims along
+            `coord`, preserving the historical behavior where placement and gaze are
+            coupled.
         orthographic (bool): Whether the camera is orthographic
 
         noise_std (float): Standard deviation of the Gaussian noise to be added to
@@ -83,6 +87,7 @@ class MjCambrianEyeConfig(HydraContainerConfig):
     sensorsize: Tuple[float, float]
     resolution: Tuple[int, int]
     coord: Tuple[float, float]
+    gaze_coord: Optional[Tuple[float, float]]
     orthographic: bool
 
     noise_std: float
@@ -305,12 +310,22 @@ class MjCambrianEye:
         Todo:
             rotations are weird. fix this.
         """
+        gaze_coord = self._config.gaze_coord
+        if gaze_coord is None:
+            gaze_coord = coord
+
         lat, lon = torch.deg2rad(torch.tensor(coord))
+        gaze_lat, gaze_lon = torch.deg2rad(torch.tensor(gaze_coord))
         lon += torch.pi / 2
+        gaze_lon += torch.pi / 2
 
         default_rot = R.from_euler("z", torch.pi / 2)
         pos_rot = default_rot * R.from_euler("yz", [lat, lon])
-        rot_rot = R.from_euler("z", lat) * R.from_euler("y", -lon) * default_rot
+        rot_rot = (
+            R.from_euler("z", gaze_lat)
+            * R.from_euler("y", -gaze_lon)
+            * default_rot
+        )
 
         pos = pos_rot.apply([-geom.rbound, 0, 0]) + geom.pos
         quat = rot_rot.as_quat()

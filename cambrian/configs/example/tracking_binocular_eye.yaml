@@ -1,0 +1,22 @@
+# @package _global_
+
+# Tracking baseline with two independently actuated pan/tilt eyes. This keeps the
+# known-good fixed binocular geometry from the single-eye investigation and decouples
+# gaze from body locomotion via MjCambrianAgentPointEye.
+
+defaults:
+  - example
+  - override /task: tracking
+  - override /env/agents@env.agents.agent: point_eye
+  - override /env/agents/eyes@env.agents.agent.eyes.eye: binocular_actuated
+
+env:
+  agents:
+    agent:
+      # Options: independent, binocular. The binocular mode interprets eye actions as
+      # [pan_version, pan_vergence, tilt_version, tilt_vergence].
+      eye_action_mode: independent
+      eyes:
+        eye:
+          noise_std: 0
+          integration_factor: 0

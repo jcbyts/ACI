@@ -76,6 +76,9 @@ class MjCambrianAgentConfig(HydraContainerConfig):
         use_contact_obs (bool): Whether to use the contact observation or not. If this
             is True, then the contacts will be included in the observation space of the
             agent.
+        eye_action_mode (str): How an eye-capable agent maps policy eye actions onto
+            physical eye actuators. Ignored by agents without actuated eyes. Supported
+            by MjCambrianAgentPointEye: "independent" and "binocular".
 
         eyes (Dict[str, MjCambrianEyeConfig]): The eyes on the agent. The keys are the
             names of the eyes and the values are the configs for the eyes. The eyes will
@@ -101,6 +104,7 @@ class MjCambrianAgentConfig(HydraContainerConfig):
 
     use_action_obs: bool
     use_contact_obs: bool
+    eye_action_mode: str = "independent"
 
     eyes: Dict[str, MjCambrianEyeConfig]
 
@@ -346,7 +350,7 @@ class MjCambrianAgent:
         for actuator in self._actuators:
             action = self._spec.data.ctrl[actuator.adr]
             if actuator.ctrllimited:
-                action = np.interp(action, [-1, 1], actuator.ctrlrange)
+                action = np.interp(action, actuator.ctrlrange, [-1, 1])
             self._last_action.append(action)
 
         obs: Dict[str, Any] = {}

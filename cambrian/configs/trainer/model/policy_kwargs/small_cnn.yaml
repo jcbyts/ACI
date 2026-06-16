@@ -1,0 +1,14 @@
+defaults:
+  - combined
+
+features_extractor_kwargs:
+  image_extractor:
+    _target_: cambrian.ml.features_extractors.MjCambrianSmallCNNExtractor
+    _partial_: true
+    features_dim: 32
+    activation:
+      _target_: torch.nn.Tanh
+      _partial_: true
+    channels: [16, 32]
+    kernel_sizes: [5, 3]
+    strides: [2, 1]

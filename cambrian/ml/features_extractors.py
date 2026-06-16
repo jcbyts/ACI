@@ -192,6 +192,131 @@ class MjCambrianMLPExtractor(MjCambrianImageFeaturesExtractor):
         return super().forward(encodings)
 
 
+class MjCambrianSmallCNNExtractor(MjCambrianImageFeaturesExtractor):
+    """Small CNN image extractor for low-resolution retinal observations."""
+
+    def __init__(
+        self,
+        observation_space: gym.Space,
+        features_dim: int,
+        activation: torch.nn.Module,
+        channels: List[int] = [16, 32],
+        kernel_sizes: List[int] = [5, 3],
+        strides: List[int] = [2, 1],
+        **_,
+    ) -> None:
+        super().__init__(observation_space, features_dim, activation)
+
+        assert len(channels) > 0, "SmallCNN requires at least one channel size."
+        assert len(channels) == len(kernel_sizes) == len(strides), (
+            "channels, kernel_sizes, and strides must have the same length."
+        )
+
+        if len(observation_space.shape) == 4:
+            _, n_channels, height, width = observation_space.shape
+        else:
+            n_channels, height, width = observation_space.shape
+
+        layers = []
+        in_channels = n_channels
+        for out_channels, kernel_size, stride in zip(channels, kernel_sizes, strides):
+            kernel_size = min(kernel_size, height, width)
+            layers.append(
+                torch.nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    padding=kernel_size // 2,
+                )
+            )
+            layers.append(activation())
+            in_channels = out_channels
+        layers.extend([torch.nn.AdaptiveAvgPool2d((1, 1)), torch.nn.Flatten()])
+        self.cnn = torch.nn.Sequential(*layers)
+
+        self.linear = torch.nn.Sequential(
+            torch.nn.Linear(channels[-1], features_dim),
+            activation(),
+        )
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        B = observations.shape[0]
+        observations = observations.reshape(-1, *observations.shape[2:])
+        encodings = self.linear(self.cnn(observations))
+        encodings = encodings.reshape(B, -1)
+        return super().forward(encodings)
+
+
+class MjCambrianSpatialCNNExtractor(MjCambrianImageFeaturesExtractor):
+    """CNN extractor that preserves spatial retinal layout before projection."""
+
+    def __init__(
+        self,
+        observation_space: gym.Space,
+        features_dim: int,
+        activation: torch.nn.Module,
+        channels: List[int] = [16, 32, 64],
+        kernel_sizes: List[int] = [5, 3, 3],
+        strides: List[int] = [2, 1, 1],
+        hidden_dim: int = 128,
+        **_,
+    ) -> None:
+        super().__init__(observation_space, features_dim, activation)
+
+        assert len(channels) > 0, "SpatialCNN requires at least one channel size."
+        assert len(channels) == len(kernel_sizes) == len(strides), (
+            "channels, kernel_sizes, and strides must have the same length."
+        )
+
+        if len(observation_space.shape) == 4:
+            _, n_channels, height, width = observation_space.shape
+        else:
+            n_channels, height, width = observation_space.shape
+
+        layers = []
+        in_channels = n_channels
+        for out_channels, kernel_size, stride in zip(channels, kernel_sizes, strides):
+            kernel_size = min(kernel_size, height, width)
+            layers.append(
+                torch.nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    padding=kernel_size // 2,
+                )
+            )
+            layers.append(activation())
+            in_channels = out_channels
+        layers.append(torch.nn.Flatten())
+        self.cnn = torch.nn.Sequential(*layers)
+
+        with torch.no_grad():
+            sample = torch.zeros(1, n_channels, height, width)
+            n_flatten = self.cnn(sample).shape[1]
+
+        self.linear = torch.nn.Sequential(
+            torch.nn.Linear(n_flatten, hidden_dim),
+            activation(),
+            torch.nn.Linear(hidden_dim, features_dim),
+            activation(),
+        )
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        B = observations.shape[0]
+        if observations.dim() == 5:
+            observations = observations.reshape(-1, *observations.shape[2:])
+        elif observations.dim() != 4:
+            raise ValueError(
+                "Expected image observations with shape [B,C,H,W] or [B,T,C,H,W], "
+                f"got {tuple(observations.shape)}"
+            )
+        encodings = self.linear(self.cnn(observations))
+        encodings = encodings.reshape(B, -1)
+        return super().forward(encodings)
+
+
 class MjCambrianNatureCNNExtractor(MjCambrianImageFeaturesExtractor):
     """Nature CNN feature extractor for images. This is the default feature extractor
     for stable baseline3 images. The main differences between this and the original
