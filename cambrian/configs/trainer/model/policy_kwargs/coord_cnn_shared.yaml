@@ -1,0 +1,3 @@
+defaults:
+  - coord_cnn
+  - shared

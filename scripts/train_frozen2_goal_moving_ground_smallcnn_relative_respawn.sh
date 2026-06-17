@@ -14,7 +14,9 @@ GOAL_RESPAWN_REWARD="${GOAL_RESPAWN_REWARD:-10.0}"
 APPROACH_REWARD="${APPROACH_REWARD:-2.0}"
 TIME_REWARD="${TIME_REWARD:--0.01}"
 CONTACT_REWARD="${CONTACT_REWARD:-0.0}"
-GOAL_SPEED="${GOAL_SPEED:--0.45}"
+# Point agents map action speed [-1, 1] to physical forward speed [0, 1].
+# Values closer to -1 are slower; -0.9 keeps the target moving without sweeping.
+GOAL_SPEED="${GOAL_SPEED:--0.9}"
 ENT_COEF="${ENT_COEF:-0.02}"
 LEARNING_RATE="${LEARNING_RATE:-0.0005}"
 CLIP_RANGE="${CLIP_RANGE:-0.2}"

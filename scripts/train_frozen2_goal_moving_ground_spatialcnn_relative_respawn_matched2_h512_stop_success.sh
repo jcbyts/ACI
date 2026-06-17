@@ -6,7 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPNAME="${EXPNAME:-exp_frozen2_goal_moving_ground_spatialcnn_relative_respawn_matched2_h512_120k}"
 TOTAL_TIMESTEPS="${TOTAL_TIMESTEPS:-120000}"
 EVAL_FREQ="${EVAL_FREQ:-10000}"
-GOAL_SPEED="${GOAL_SPEED:--0.45}"
+# Point agents map action speed [-1, 1] to physical forward speed [0, 1].
+# Values closer to -1 are slower; -0.9 keeps the target moving without sweeping.
+GOAL_SPEED="${GOAL_SPEED:--0.9}"
 APPROACH_REWARD="${APPROACH_REWARD:-8.0}"
 LEARNING_RATE="${LEARNING_RATE:-0.00025}"
 ENT_COEF="${ENT_COEF:-0.01}"

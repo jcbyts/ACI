@@ -250,6 +250,64 @@ class MjCambrianConstantActionWrapper(gym.Wrapper):
         return self.env.step(action)
 
 
+class MjCambrianActionRescaleWrapper(gym.Wrapper):
+    """Rescale selected normalized action dimensions before stepping the env.
+
+    The wrapper keeps the policy-facing action space unchanged, but maps selected
+    action dimensions from ``[-1, 1]`` into narrower raw action intervals. This is
+    useful when an agent's normalized action semantics make the default zero-mean
+    Gaussian policy unsafe or poorly scaled.
+
+    Args:
+        rescale_actions: Mapping from action index to ``[raw_low, raw_high]``.
+    """
+
+    def __init__(self, env: MjCambrianEnv, rescale_actions: Dict[Any, Any]):
+        super().__init__(env)
+
+        self._rescale_action_indices = [
+            int(k) if is_integer(k) else k for k in rescale_actions.keys()
+        ]
+        self._rescale_action_ranges = [
+            tuple(float(v) for v in values) for values in rescale_actions.values()
+        ]
+        for values in self._rescale_action_ranges:
+            if len(values) != 2:
+                raise ValueError("Each rescale action range must have two values.")
+            if values[0] > values[1]:
+                raise ValueError(f"Invalid action range {values}: low > high.")
+
+    def step(
+        self, action: ActionType
+    ) -> Tuple[ObsType, RewardType, TerminatedType, TruncatedType, InfoType]:
+        is_dict_action = isinstance(action, dict)
+        if isinstance(action, dict):
+            action = {key: np.array(value, copy=True) for key, value in action.items()}
+            action_values = action.values()
+        else:
+            action = np.array(action, copy=True)
+            action_values = [action]
+
+        for action_value in action_values:
+            for idx, (raw_low, raw_high) in zip(
+                self._rescale_action_indices,
+                self._rescale_action_ranges,
+            ):
+                normalized = np.clip(action_value[idx], -1.0, 1.0)
+                action_value[idx] = raw_low + (
+                    (normalized + 1.0) * 0.5 * (raw_high - raw_low)
+                )
+
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        if isinstance(info, dict):
+            if is_dict_action and all(key in info for key in action):
+                for key, value in action.items():
+                    info[key]["rescaled_action"] = np.asarray(value).copy()
+            else:
+                info["rescaled_action"] = np.asarray(action).copy()
+        return obs, reward, terminated, truncated, info
+
+
 @torch_to_numpy.register(np.ndarray)
 def _(value: np.ndarray) -> np.ndarray:
     return value
