@@ -129,16 +129,19 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
             f"got {self._numctrl}."
         )
         self._eye_action_mode = self._config.eye_action_mode
-        assert self._eye_action_mode in {"independent", "binocular"}, (
-            "eye_action_mode must be 'independent' or 'binocular', "
+        assert self._eye_action_mode in {"independent", "binocular", "yoked"}, (
+            "eye_action_mode must be 'independent', 'binocular', or 'yoked', "
             f"got '{self._eye_action_mode}'."
         )
-        if self._eye_action_mode == "binocular":
+        if self._eye_action_mode in {"binocular", "yoked"}:
             assert self._n_eye_actuators == 4, (
                 "binocular eye_action_mode requires exactly two pan/tilt eyes "
                 f"(4 eye actuators), got {self._n_eye_actuators}."
             )
-        self._last_eye_action = np.zeros(self._n_eye_actuators, dtype=np.float32)
+        self._eye_action_size = (
+            2 if self._eye_action_mode == "yoked" else self._n_eye_actuators
+        )
+        self._last_eye_action = np.zeros(self._eye_action_size, dtype=np.float32)
 
     @property
     def _eye_actuators(self):
@@ -152,7 +155,7 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
         The first two elements drive the body (identical to the parent), and the
         remaining elements set the eye gimbal position actuators directly.
         """
-        n_eye = self._n_eye_actuators
+        n_eye = self._eye_action_size
         assert len(action) == 2 + n_eye, (
             f"Action must have {2 + n_eye} elements "
             f"(2 body + {n_eye} eye), got {len(action)}."
@@ -176,9 +179,13 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
 
         independent: [left_pan, left_tilt, right_pan, right_tilt]
         binocular: [pan_version, pan_vergence, tilt_version, tilt_vergence]
+        yoked: [pan, tilt] applied to both eyes
         """
         if self._eye_action_mode == "independent" or eye_action.size == 0:
             return eye_action
+        if self._eye_action_mode == "yoked":
+            pan, tilt = eye_action
+            return np.asarray([pan, tilt, pan, tilt], dtype=np.float32)
 
         pan_version, pan_vergence, tilt_version, tilt_vergence = eye_action
         return np.clip(
@@ -215,8 +222,8 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
 
     @cached_property
     def action_space(self) -> spaces.Space:
-        """2 body dims + one dim per eye gimbal actuator."""
-        n = 2 + self._n_eye_actuators
+        """2 body dims plus the configured policy eye-action dimensions."""
+        n = 2 + self._eye_action_size
         return spaces.Box(low=-1, high=1, shape=(n,), dtype=np.float32)
 
 

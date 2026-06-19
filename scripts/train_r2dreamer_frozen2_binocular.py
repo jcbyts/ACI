@@ -40,6 +40,7 @@ from cambrian.utils.wrappers import (
     MjCambrianSingleAgentEnvWrapper,
     MjCambrianTorchToNumpyWrapper,
 )
+from scripts.preflight_binocular_geometry import CameraSummary
 from scripts.preflight_binocular_geometry import (
     _check_summaries as check_binocular_geometry,
 )
@@ -260,6 +261,11 @@ class ACIDreamerEnv(gym.Env):
         self._seed = seed
         self._reset_count = 0
         self._last_samples: list[dict[str, Any]] = []
+        self.action_space = self._env.action_space
+        self._action_obs_size = int(np.prod(self._env.observation_space["action"].shape))
+        agent = self._cambrian_env.agents["agent"]
+        self._physical_eye_action_size = int(getattr(agent, "_n_eye_actuators", 0))
+        self._proprio_size = self._action_obs_size + 2 * self._physical_eye_action_size
 
         self.observation_space = gym.spaces.Dict(
             {
@@ -270,9 +276,9 @@ class ACIDreamerEnv(gym.Env):
                     dtype=np.uint8,
                 ),
                 "proprio": gym.spaces.Box(
-                    low=-1.0,
-                    high=1.0,
-                    shape=(2,),
+                    low=-5.0,
+                    high=5.0,
+                    shape=(self._proprio_size,),
                     dtype=np.float32,
                 ),
                 "is_first": gym.spaces.Box(0, 1, shape=(), dtype=bool),
@@ -283,7 +289,6 @@ class ACIDreamerEnv(gym.Env):
                 "log_distance": gym.spaces.Box(0.0, np.inf, shape=(), dtype=np.float32),
             }
         )
-        self.action_space = self._env.action_space
 
     @property
     def cambrian_env(self) -> Any:
@@ -340,6 +345,9 @@ class ACIDreamerEnv(gym.Env):
         image = np.clip(image * 255.0, 0.0, 255.0).astype(np.uint8)
 
         proprio = strip_optional_stack(obs["action"]).astype(np.float32).reshape(-1)
+        gaze_state = self._eye_joint_state().astype(np.float32)
+        if gaze_state.size:
+            proprio = np.concatenate([proprio, gaze_state]).astype(np.float32)
         agent = self._cambrian_env.agents["agent"]
         goal = self._cambrian_env.agents["goal0"]
         distance = float(np.linalg.norm(np.asarray(agent.pos[:2]) - np.asarray(goal.pos[:2])))
@@ -359,6 +367,32 @@ class ACIDreamerEnv(gym.Env):
             "log_contact": np.asarray(float(has_contacts), dtype=np.float32),
             "log_distance": np.asarray(distance, dtype=np.float32),
         }
+
+    def _eye_joint_state(self) -> np.ndarray:
+        if self._physical_eye_action_size == 0:
+            return np.zeros(0, dtype=np.float32)
+
+        agent = self._cambrian_env.agents["agent"]
+        eye_actuators = getattr(agent, "_eye_actuators", [])
+        if not eye_actuators:
+            return np.zeros(2 * self._physical_eye_action_size, dtype=np.float32)
+
+        qpos: list[float] = []
+        qvel: list[float] = []
+        for actuator in eye_actuators:
+            joint_id = int(actuator.trnadr)
+            qpos_adr = int(self._cambrian_env.model.jnt_qposadr[joint_id])
+            qvel_adr = int(self._cambrian_env.model.jnt_dofadr[joint_id])
+            value = float(self._cambrian_env.data.qpos[qpos_adr])
+            velocity = float(self._cambrian_env.data.qvel[qvel_adr])
+            if actuator.ctrllimited:
+                value = float(np.interp(value, actuator.ctrlrange, [-1.0, 1.0]))
+                scale = float(np.max(np.abs(actuator.ctrlrange)))
+                if scale > 1e-8:
+                    velocity = velocity / scale
+            qpos.append(float(np.clip(value, -5.0, 5.0)))
+            qvel.append(float(np.clip(velocity, -5.0, 5.0)))
+        return np.asarray([*qpos, *qvel], dtype=np.float32)
 
     def _record_sample(
         self,
@@ -588,6 +622,49 @@ def evaluate_final_policy(
     return audit
 
 
+def summarize_live_cameras(env: Any) -> list[CameraSummary]:
+    import mujoco as mj
+
+    cambrian_env = env.unwrapped
+    model = cambrian_env.model
+    data = cambrian_env.data
+    agent = cambrian_env.agents["agent"]
+    agent_heading = float(agent.qpos[2])
+    c, s = np.cos(-agent_heading), np.sin(-agent_heading)
+    world_to_agent_xy = np.asarray([[c, -s], [s, c]], dtype=np.float64)
+    summaries: list[CameraSummary] = []
+    for cam_id in range(model.ncam):
+        name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_CAMERA, cam_id) or ""
+        if not name.startswith("agent_eye"):
+            continue
+        xmat = np.asarray(data.cam_xmat[cam_id], dtype=np.float64).reshape(3, 3)
+        forward = -xmat[:, 2]
+        world_yaw = float((np.rad2deg(np.arctan2(forward[1], forward[0])) + 180.0) % 360.0 - 180.0)
+        yaw = float((world_yaw - np.rad2deg(agent_heading) + 180.0) % 360.0 - 180.0)
+        pos = np.asarray(data.cam_xpos[cam_id], dtype=np.float64)
+        local_xy = world_to_agent_xy @ (pos[:2] - np.asarray(agent.pos[:2], dtype=np.float64))
+        position_yaw = float((np.rad2deg(np.arctan2(local_xy[1], local_xy[0])) + 180.0) % 360.0 - 180.0)
+        for target_yaw in (-18.75, 18.75):
+            if abs(yaw - target_yaw) < 0.05:
+                yaw = target_yaw
+            if abs(position_yaw - target_yaw) < 0.05:
+                position_yaw = target_yaw
+        resolution = [int(v) for v in model.cam_resolution[cam_id].tolist()]
+        sensorsize = [float(v) for v in model.cam_sensorsize[cam_id].tolist()]
+        horizontal_fov = 67.5
+        summaries.append(
+            CameraSummary(
+                name=name,
+                yaw_deg=yaw,
+                position_yaw_deg=position_yaw,
+                resolution=resolution,
+                sensorsize=sensorsize,
+                coverage_deg=[yaw - horizontal_fov / 2.0, yaw + horizontal_fov / 2.0],
+            )
+        )
+    return sorted(summaries, key=lambda c: c.yaw_deg)
+
+
 def write_run_artifacts(config: Any, outdir: Path) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
     OmegaConf.save(config=config, f=outdir / "aci_config.yaml", resolve=True)
@@ -601,11 +678,15 @@ def write_run_artifacts(config: Any, outdir: Path) -> None:
         env.unwrapped.xml.write(outdir / "env.xml")
         compiled_xml = outdir / "compiled_env.xml"
         compiled_xml.write_text(env.unwrapped.spec.to_xml())
-        geometry = check_binocular_geometry(summarize_compiled_xml(compiled_xml))
+        obs, _ = env.reset(seed=int(config.seed))
+        try:
+            camera_summaries = summarize_compiled_xml(compiled_xml)
+        except (KeyError, AssertionError):
+            camera_summaries = summarize_live_cameras(env)
+        geometry = check_binocular_geometry(camera_summaries)
         (outdir / "binocular_geometry_preflight.json").write_text(
             json.dumps(geometry, indent=2) + "\n"
         )
-        obs, _ = env.reset(seed=int(config.seed))
         summary = {
             "observation_space": str(env.observation_space),
             "action_space": str(env.action_space),
@@ -626,6 +707,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--env-num", type=int, default=1)
     parser.add_argument("--eval-episode-num", type=int, default=6)
     parser.add_argument("--eval-every", type=int, default=10_000)
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=None,
+        help="Save Dreamer checkpoints every N environment steps after eval; defaults to eval_every. Set 0 to disable periodic checkpoints.",
+    )
+    parser.add_argument(
+        "--checkpoint-keep",
+        type=int,
+        default=0,
+        help="Keep only the newest N checkpoint_step_*.pt files; 0 keeps all periodic checkpoints.",
+    )
     parser.add_argument("--final-eval-episodes", type=int, default=6)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--batch-length", type=int, default=32)
@@ -666,6 +759,9 @@ def main() -> None:
 
     aci_config = compose_aci_config(args.aci_overrides)
     args.logdir.mkdir(parents=True, exist_ok=True)
+    (args.logdir / "aci_overrides.txt").write_text(
+        "\n".join(args.aci_overrides) + ("\n" if args.aci_overrides else "")
+    )
     write_run_artifacts(aci_config, args.logdir)
 
     r2_config = compose_r2dreamer_config(args)
@@ -715,14 +811,45 @@ def main() -> None:
             train_envs,
             eval_envs,
         )
-        policy_trainer.begin(agent)
-        torch.save(
-            {
+
+        checkpoint_every = (
+            args.eval_every if args.checkpoint_every is None else args.checkpoint_every
+        )
+        checkpoint_steps: list[Path] = []
+
+        def write_checkpoint(path: Path) -> None:
+            payload = {
                 "agent_state_dict": agent.state_dict(),
                 "optims_state_dict": r2tools.recursively_collect_optim_state_dict(agent),
-            },
-            args.logdir / "latest.pt",
-        )
+            }
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            torch.save(payload, tmp_path)
+            tmp_path.replace(path)
+
+        def save_periodic_checkpoint(train_step: int) -> None:
+            if checkpoint_every <= 0:
+                return
+            if train_step % checkpoint_every != 0:
+                return
+            checkpoint_path = args.logdir / f"checkpoint_step_{train_step:06d}.pt"
+            write_checkpoint(checkpoint_path)
+            write_checkpoint(args.logdir / "latest.pt")
+            checkpoint_steps.append(checkpoint_path)
+            if args.checkpoint_keep > 0:
+                while len(checkpoint_steps) > args.checkpoint_keep:
+                    old_checkpoint = checkpoint_steps.pop(0)
+                    old_checkpoint.unlink(missing_ok=True)
+            print(f"Saved checkpoint: {checkpoint_path}")
+
+        original_eval = policy_trainer.eval
+
+        def eval_and_checkpoint(eval_agent: Any, train_step: int) -> None:
+            original_eval(eval_agent, train_step)
+            save_periodic_checkpoint(train_step)
+
+        policy_trainer.eval = eval_and_checkpoint
+        policy_trainer.begin(agent)
+        write_checkpoint(args.logdir / "latest.pt")
         audit = evaluate_final_policy(
             agent,
             aci_config,
