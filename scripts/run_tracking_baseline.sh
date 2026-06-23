@@ -19,6 +19,9 @@ case "${MODE}" in
   actuated-2eye-rppo)
     CONFIG="tracking_2eye_recurrent_actuated"
     ;;
+  actuated-2eye-mlp)
+    CONFIG="tracking_2eye_mlp_actuated"
+    ;;
   *)
     echo "Unknown mode: ${MODE}" >&2
     echo "Expected one of: original-3eye-mlp, fixed-2eye-mlp, fixed-2eye-rppo, actuated-2eye-rppo" >&2

@@ -1,0 +1,17 @@
+# @package _global_
+env:
+  reward_fn:
+    living_cost:
+      _target_: cambrian.envs.reward_fns.reward_fn_constant
+      _partial_: true
+      reward: -0.005
+      for_agents: ${glob:agent*,${oc.dict.keys:env.agents}}
+
+    reward_if_done:
+      termination_reward: 5.0
+      truncation_reward: -5.0
+
+eval_env:
+  reward_fn:
+    living_cost:
+      disable: true

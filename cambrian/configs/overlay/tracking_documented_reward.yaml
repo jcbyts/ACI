@@ -1,0 +1,19 @@
+# @package _global_
+
+# Restore the goal-progress term described in the ACI tracking documentation.
+# Keep it training-only so clean evaluation still measures actual target and
+# adversary encounters.
+
+env:
+  reward_fn:
+    euclidean_delta_to_goal:
+      _target_: cambrian.envs.reward_fns.reward_fn_euclidean_delta_to_agent
+      _partial_: true
+      reward: 0.25
+      for_agents: [agent]
+      to_agents: [goal0]
+
+eval_env:
+  reward_fn:
+    euclidean_delta_to_goal:
+      disable: true

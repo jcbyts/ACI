@@ -1,0 +1,19 @@
+# @package _global_
+
+# Practical actuated-eye baseline:
+# keep the successful fixed-2eye MLP/PPO training stack, but replace the fixed
+# binocular eyes with independently actuated binocular eyes.
+
+defaults:
+  - tracking_2eye_mlp_fixed
+  - override /env/agents@env.agents.agent: point_eye
+  - override /env/agents/eyes@env.agents.agent.eyes.eye: binocular_matched_actuated
+
+expname: tracking_2eye_mlp_actuated_seed${seed}
+
+env:
+  agents:
+    agent:
+      eye_action_mode: independent
+      use_action_obs: true
+      use_eye_state_obs: true
