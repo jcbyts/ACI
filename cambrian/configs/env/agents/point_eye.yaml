@@ -1,9 +1,9 @@
 defaults:
   - agent
 
-# Point agent with actuated pan/tilt eye(s) -> 4D action space [v, heading, pan, tilt].
-# Identical body to `point`; only the agent instance differs so the eye actuators are
-# appended to the action space.
+# Point agent with actuated pan/tilt eye(s). The action space has two body
+# commands plus the eye commands: 4D for one/yoked eye pair, 6D for independent
+# binocular pan/tilt. The body is otherwise identical to `point`.
 instance:
   _target_: cambrian.agents.MjCambrianAgentPointEye
   _partial_: true

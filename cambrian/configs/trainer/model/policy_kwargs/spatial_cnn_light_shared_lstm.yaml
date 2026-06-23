@@ -1,0 +1,9 @@
+defaults:
+  - spatial_cnn_light_shared
+
+lstm_hidden_size: 128
+n_lstm_layers: 1
+
+# Initially use separate recurrent actor and critic paths.
+shared_lstm: false
+enable_critic_lstm: true

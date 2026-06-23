@@ -1,8 +1,16 @@
-"""This module contains custom feature extractors for use in the models."""
+"""Custom feature extractors used by the PPO policies.
 
-from typing import Dict, List
+Cambrian eye observations are emitted in channels-last form (``H, W, C``), while
+``torch.nn.Conv2d`` requires channels-first tensors (``C, H, W``).  Stable
+Baselines normally inserts a transpose wrapper for uint8 images, but Cambrian's
+retinal observations are normalized float tensors.  Consequently, layout handling
+must be explicit here rather than delegated to SB3.
+"""
+
+from typing import Dict, List, Sequence
 
 import gymnasium as gym
+import numpy as np
 import torch
 from gymnasium import spaces
 from stable_baselines3.common.torch_layers import (
@@ -31,35 +39,74 @@ def is_image_space(
     )
 
 
-def maybe_transpose_space(observation_space: spaces.Box) -> spaces.Box:
-    """This is an extension of the sb3 maybe_transpose_space to support both regular
-    images (HxWxC) and images with an additional dimension (NxHxWxC). sb3 will call
-    maybe_transpose_space on the 3D case, but not the 4D."""
+def _image_channels_last(shape: Sequence[int]) -> bool:
+    """Infer whether a 3D/4D image shape is channels-last.
 
-    if len(observation_space.shape) == 4:
-        num, height, width, channels = observation_space.shape
-        new_shape = (num, channels, height, width)
-        observation_space = spaces.Box(
-            low=observation_space.low.reshape(new_shape),
-            high=observation_space.high.reshape(new_shape),
-            dtype=observation_space.dtype,
-        )
-    return observation_space
-
-
-def maybe_transpose_obs(observation: torch.Tensor) -> torch.Tensor:
-    """This is an extension of the sb3 maybe_transpose_obs to support both regular
-    images (HxWxC) and images with an additional dimension (NxHxWxC). sb3 will call
-    maybe_transpose_obs on the 3D case, but not the 4D.
-
-    Note:
-        In this case, there is a batch dimension, so the observation is 5D.
+    Supported forms are ``HWC``, ``CHW``, ``NHWC``, and ``NCHW``.  The inference is
+    deliberately strict: a silent layout guess is worse than a hard failure because a
+    mistaken guess still produces a trainable network with the wrong semantic axes.
     """
 
-    if len(observation.shape) == 5:
-        observation = observation.permute(0, 1, 4, 2, 3)  # [B, T, N, H, W]
+    if len(shape) == 3:
+        first_channel, first_spatial = shape[0], shape[1:]
+        last_channel, last_spatial = shape[-1], shape[:-1]
+    elif len(shape) == 4:
+        # The first axis is the temporal/frame-stack axis.
+        first_channel, first_spatial = shape[1], shape[2:]
+        last_channel, last_spatial = shape[-1], shape[1:-1]
+    else:
+        raise ValueError(f"Expected a 3D or 4D image space, got shape {tuple(shape)}")
 
-    return observation
+    first_plausible = first_channel < min(first_spatial)
+    last_plausible = last_channel < min(last_spatial)
+
+    if first_plausible == last_plausible:
+        raise ValueError(
+            "Could not unambiguously infer image layout for shape "
+            f"{tuple(shape)}. Expected HWC/CHW or NHWC/NCHW with a channel axis "
+            "smaller than both spatial axes."
+        )
+    return last_plausible
+
+
+def maybe_transpose_space(observation_space: spaces.Box) -> spaces.Box:
+    """Return an equivalent channels-first image space.
+
+    ``numpy.transpose`` is required here.  Reshaping an HWC bounds array into CHW does
+    not preserve the mapping between pixels and channels when bounds are non-uniform.
+    """
+
+    if not _image_channels_last(observation_space.shape):
+        return observation_space
+
+    if len(observation_space.shape) == 3:
+        axes = (2, 0, 1)  # HWC -> CHW
+    else:
+        axes = (0, 3, 1, 2)  # NHWC -> NCHW
+
+    return spaces.Box(
+        low=np.transpose(observation_space.low, axes),
+        high=np.transpose(observation_space.high, axes),
+        dtype=observation_space.dtype,
+    )
+
+
+def maybe_transpose_obs(
+    observation: torch.Tensor, *, channels_last: bool
+) -> torch.Tensor:
+    """Convert a batched image tensor to channels-first form when required."""
+
+    if not channels_last:
+        return observation
+
+    if observation.dim() == 4:
+        return observation.permute(0, 3, 1, 2).contiguous()  # BHWC -> BCHW
+    if observation.dim() == 5:
+        return observation.permute(0, 1, 4, 2, 3).contiguous()  # BNHWC -> BNCHW
+    raise ValueError(
+        "Expected a batched HWC or NHWC image tensor, got "
+        f"shape {tuple(observation.shape)}"
+    )
 
 
 # ==================
@@ -82,6 +129,7 @@ class MjCambrianCombinedExtractor(BaseFeaturesExtractor):
         super().__init__(observation_space, features_dim=1)
 
         self._image_extractor = None
+        self._image_channels_last: Dict[str, bool] = {}
         if share_image_extractor:
             # Verify all the image spaces have the same shape
             image_space = None
@@ -102,6 +150,7 @@ class MjCambrianCombinedExtractor(BaseFeaturesExtractor):
         total_concat_size = 0
         for key, subspace in observation_space.spaces.items():
             if is_image_space(subspace, normalized_image=normalized_image):
+                self._image_channels_last[key] = _image_channels_last(subspace.shape)
                 subspace = maybe_transpose_space(subspace)
                 if share_image_extractor:
                     extractors[key] = self._image_extractor
@@ -120,7 +169,11 @@ class MjCambrianCombinedExtractor(BaseFeaturesExtractor):
     def forward(self, observations: TensorDict) -> torch.Tensor:
         encoded_tensor_list = []
         for key, extractor in self.extractors.items():
-            obs = maybe_transpose_obs(observations[key])
+            obs = observations[key]
+            if key in self._image_channels_last:
+                obs = maybe_transpose_obs(
+                    obs, channels_last=self._image_channels_last[key]
+                )
             encoded_tensor_list.append(extractor(obs))
         return torch.cat(encoded_tensor_list, dim=1)
 
@@ -133,8 +186,7 @@ class PermutedFlattenExtractor(FlattenExtractor):
 
 
 class MjCambrianImageFeaturesExtractor(BaseFeaturesExtractor):
-    """This is a feature extractor for images. Will implement an image queue for
-    temporal features. Should be inherited by other classes."""
+    """Base class for image feature extractors."""
 
     def __init__(
         self,
@@ -142,18 +194,32 @@ class MjCambrianImageFeaturesExtractor(BaseFeaturesExtractor):
         features_dim: int,
         activation: torch.nn.Module,
     ):
+        self._leading_dim = 1
+        if len(observation_space.shape) == 4:
+            self._leading_dim = observation_space.shape[0]
         super().__init__(observation_space, features_dim)
 
-        self._queue_size = 1
         if len(observation_space.shape) == 4:
-            self._queue_size = observation_space.shape[0]
-        height, width, n_channels = observation_space.shape[-3:]
+            _, n_channels, height, width = observation_space.shape
+        elif len(observation_space.shape) == 3:
+            n_channels, height, width = observation_space.shape
+        else:
+            raise ValueError(
+                "Expected a CHW or NCHW image space, got "
+                f"shape {observation_space.shape}"
+            )
+        if n_channels <= 0 or height <= 0 or width <= 0:
+            raise ValueError(
+                f"Invalid image shape {observation_space.shape}: all axes must be > 0"
+            )
         self._num_pixels = n_channels * height * width
-
-        self.temporal_linear = torch.nn.Sequential(
-            torch.nn.Linear(features_dim * self._queue_size, features_dim),
-            activation(),
-        )
+        if self._leading_dim > 1:
+            self.temporal_linear = torch.nn.Sequential(
+                torch.nn.Linear(features_dim * self._leading_dim, features_dim),
+                activation(),
+            )
+        else:
+            self.temporal_linear = torch.nn.Identity()
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         return self.temporal_linear(observations)
@@ -193,7 +259,13 @@ class MjCambrianMLPExtractor(MjCambrianImageFeaturesExtractor):
 
 
 class MjCambrianSmallCNNExtractor(MjCambrianImageFeaturesExtractor):
-    """Small CNN image extractor for low-resolution retinal observations."""
+    """Small CNN with global average pooling.
+
+    This extractor is retained for historical compatibility.  Its terminal
+    ``AdaptiveAvgPool2d(1, 1)`` discards explicit within-eye spatial layout, so it
+    should not be used as the localization encoder for the binocular tracking
+    baselines.  Use :class:`MjCambrianSpatialCNNExtractor` instead.
+    """
 
     def __init__(
         self,
@@ -242,7 +314,13 @@ class MjCambrianSmallCNNExtractor(MjCambrianImageFeaturesExtractor):
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         B = observations.shape[0]
-        observations = observations.reshape(-1, *observations.shape[2:])
+        if observations.dim() == 5:
+            observations = observations.reshape(-1, *observations.shape[2:])
+        elif observations.dim() != 4:
+            raise ValueError(
+                "Expected image observations with shape [B,C,H,W] or [B,T,C,H,W], "
+                f"got {tuple(observations.shape)}"
+            )
         encodings = self.linear(self.cnn(observations))
         encodings = encodings.reshape(B, -1)
         return super().forward(encodings)
@@ -428,8 +506,15 @@ class MjCambrianNatureCNNExtractor(MjCambrianImageFeaturesExtractor):
     ):
         super().__init__(observation_space, features_dim, activation)
 
-        n_channels = observation_space.shape[1]
-        width, height = observation_space.shape[2], observation_space.shape[3]
+        if len(observation_space.shape) == 4:
+            _, n_channels, height, width = observation_space.shape
+        elif len(observation_space.shape) == 3:
+            n_channels, height, width = observation_space.shape
+        else:
+            raise ValueError(
+                "Expected a CHW or NCHW image space, got "
+                f"shape {observation_space.shape}"
+            )
 
         # Dynamically calculate kernel sizes and strides
         k_sizes, strides = self.calculate_dynamic_params(width, height)
@@ -447,12 +532,14 @@ class MjCambrianNatureCNNExtractor(MjCambrianImageFeaturesExtractor):
 
         # Compute shape by doing one forward pass
         with torch.no_grad():
-            sample = torch.as_tensor(observation_space.sample())
-            n_flatten = self.cnn(sample)
-            n_flatten = n_flatten.shape[0] * n_flatten.shape[1]
+            sample = torch.zeros(1, n_channels, height, width)
+            n_flatten = self.cnn(sample).shape[1]
 
+        # Encode each frame independently, then let ``temporal_linear`` combine
+        # the resulting T feature vectors. Multiplying the output width by T here
+        # creates T^2 features and breaks the frame-stacked path.
         self.linear = torch.nn.Sequential(
-            torch.nn.Linear(n_flatten, self._queue_size * features_dim), activation()
+            torch.nn.Linear(n_flatten, features_dim), activation()
         )
 
     def calculate_dynamic_params(self, width, height):
@@ -471,7 +558,13 @@ class MjCambrianNatureCNNExtractor(MjCambrianImageFeaturesExtractor):
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         B = observations.shape[0]
-        observations = observations.reshape(-1, *observations.shape[2:])
-        observations = self.cnn(observations)
+        if observations.dim() == 5:
+            observations = observations.reshape(-1, *observations.shape[2:])
+        elif observations.dim() != 4:
+            raise ValueError(
+                "Expected image observations with shape [B,C,H,W] or [B,T,C,H,W], "
+                f"got {tuple(observations.shape)}"
+            )
+        observations = self.linear(self.cnn(observations))
         observations = observations.reshape(B, -1)
-        return super().forward(self.linear(observations))
+        return super().forward(observations)

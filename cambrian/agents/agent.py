@@ -76,6 +76,9 @@ class MjCambrianAgentConfig(HydraContainerConfig):
         use_contact_obs (bool): Whether to use the contact observation or not. If this
             is True, then the contacts will be included in the observation space of the
             agent.
+        use_eye_state_obs (bool): Whether eye-capable agents should expose physical
+            eye joint position and velocity observations. Ignored by agents without
+            actuated eyes.
         eye_action_mode (str): How an eye-capable agent maps policy eye actions onto
             physical eye actuators. Ignored by agents without actuated eyes. Supported
             by MjCambrianAgentPointEye: "independent" and "binocular".
@@ -104,6 +107,7 @@ class MjCambrianAgentConfig(HydraContainerConfig):
 
     use_action_obs: bool
     use_contact_obs: bool
+    use_eye_state_obs: bool = False
     eye_action_mode: str = "independent"
 
     eyes: Dict[str, MjCambrianEyeConfig]
@@ -429,7 +433,10 @@ class MjCambrianAgent:
         if self._config.use_action_obs:
             obs["action"] = self._last_action
         if self._config.use_contact_obs:
-            obs["contacts"] = [self.has_contacts]
+            # Gymnasium/SB3 requires Box observations to be NumPy arrays with the
+            # declared dtype. A Python list survives the torch-to-numpy wrapper
+            # unchanged and causes ``check_env`` to reject every default agent.
+            obs["contacts"] = np.asarray([self.has_contacts], dtype=np.int32)
 
         return obs
 

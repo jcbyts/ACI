@@ -1,49 +1,40 @@
-"""Custom model class for Cambrian. This class is a subclass of the PPO model from
-Stable Baselines 3. It overrides the save and load methods to only save the policy
-weights. It also adds a method to load rollout data from a previous training run. The
-predict method is then overwritten to return the next action in the rollout if the
-rollout data is loaded. This is useful for testing the evolutionary loop without
-having to train the agent each time."""
+"""Custom model classes for Cambrian PPO baselines.
+
+The feed-forward and recurrent PPO implementations share policy-only save/load and
+rollout replay helpers, while leaving rollout collection, training, buffers, and
+recurrent-state handling to Stable Baselines / sb3-contrib.
+"""
 
 import pickle
 from pathlib import Path
 from typing import Any, Dict, List
 
 import torch
+from sb3_contrib import RecurrentPPO
 from stable_baselines3 import PPO
 
 from cambrian.utils.logger import get_logger
 
 
-class MjCambrianModel(PPO):
+class _MjCambrianModelMixin:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self._rollout: List[Dict[str, Any]] = None
+        self._rollout: List[Any] | None = None
 
     def save_policy(self, path: Path | str):
-        """Overwrite the save method. Instead of saving the entire state, we'll
-        just save the policy weights."""
+        """Save only the policy weights."""
 
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         torch.save(self.policy.state_dict(), path / "policy.pt")
 
-    def load_policy(self, path: Path | str):
-        """Overwrite the load method. Instead of loading the entire state, we'll just
-        load the policy weights.
+    def load_policy(self, path: Path | str, *, allow_partial: bool = False):
+        """Load policy weights, failing closed on architecture mismatches.
 
-        There are four cases to consider:
-            - A layer in the saved policy is identical in shape to the current policy
-                - Do nothing for this layer
-            - A layer is both present in the saved policy and the current policy, but
-                the shapes are different
-                - Delete the layer from the saved policy
-            - A layer is present in the saved policy but not the current policy
-                - Delete the layer from the saved policy
-            - A layer is present in the current policy but not the saved policy
-                - Do nothing for this layer. By setting `strict=False` in the call to
-                    `load_state_dict`, we can ignore this layer.
+        Scientific evaluation must not silently run a partly random policy.  Set
+        ``allow_partial=True`` only for an explicitly documented transfer-learning
+        operation; all ordinary replay/evaluation code should retain the strict default.
         """
 
         policy_path = Path(path) / "policy.pt"
@@ -52,14 +43,20 @@ class MjCambrianModel(PPO):
 
         # Loop through the loaded state_dict and remove any layers that don't match in
         # shape with the current policy
-        saved_state_dict = torch.load(policy_path)
+        saved_state_dict = torch.load(
+            policy_path, map_location=self.device, weights_only=True
+        )
         policy_state_dict = self.policy.state_dict()
+        missing = sorted(set(policy_state_dict) - set(saved_state_dict))
+        unexpected = sorted(set(saved_state_dict) - set(policy_state_dict))
+        shape_mismatches = []
         for saved_state_dict_key in list(saved_state_dict.keys()):
             if saved_state_dict_key not in policy_state_dict:
-                get_logger().warning(
-                    f"Key '{saved_state_dict_key}' not found in policy "
-                    "state_dict. Deleting from saved state dict."
-                )
+                if allow_partial:
+                    get_logger().warning(
+                        f"Key '{saved_state_dict_key}' not found in policy "
+                        "state_dict. Skipping it because allow_partial=True."
+                    )
                 del saved_state_dict[saved_state_dict_key]
                 continue
 
@@ -67,10 +64,40 @@ class MjCambrianModel(PPO):
             policy_state_dict_var = policy_state_dict[saved_state_dict_key]
 
             if saved_state_dict_var.shape != policy_state_dict_var.shape:
-                get_logger().warning(f"Shape mismatch for key '{saved_state_dict_key}'")
+                shape_mismatches.append(
+                    (
+                        saved_state_dict_key,
+                        tuple(saved_state_dict_var.shape),
+                        tuple(policy_state_dict_var.shape),
+                    )
+                )
                 del saved_state_dict[saved_state_dict_key]
 
-        self.policy.load_state_dict(saved_state_dict, strict=False)
+        if (missing or unexpected or shape_mismatches) and not allow_partial:
+            lines = [
+                "Policy checkpoint is incompatible with the current architecture."
+            ]
+            if missing:
+                lines.append(f"Missing keys ({len(missing)}): {missing}")
+            if unexpected:
+                lines.append(f"Unexpected keys ({len(unexpected)}): {unexpected}")
+            if shape_mismatches:
+                details = [
+                    f"{name}: saved={saved}, current={current}"
+                    for name, saved, current in shape_mismatches
+                ]
+                lines.append(
+                    f"Shape mismatches ({len(shape_mismatches)}): {details}"
+                )
+            raise RuntimeError("\n".join(lines))
+
+        if allow_partial:
+            for name, saved, current in shape_mismatches:
+                get_logger().warning(
+                    f"Skipping shape-mismatched key '{name}': "
+                    f"saved={saved}, current={current}"
+                )
+        self.policy.load_state_dict(saved_state_dict, strict=not allow_partial)
 
     def load_rollout(self, path: Path | str):
         """Load the rollout data from a previous training run. The rollout is a list
@@ -107,6 +134,17 @@ class MjCambrianModel(PPO):
 
     def predict(self, *args, **kwargs):
         if self._rollout is not None:
-            return self._rollout.pop(0), None
+            state = kwargs.get("state")
+            if state is None and len(args) > 1:
+                state = args[1]
+            return self._rollout.pop(0), state
 
         return super().predict(*args, **kwargs)
+
+
+class MjCambrianModel(_MjCambrianModelMixin, PPO):
+    pass
+
+
+class MjCambrianRecurrentModel(_MjCambrianModelMixin, RecurrentPPO):
+    pass

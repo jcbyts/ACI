@@ -73,13 +73,21 @@ def evaluate_policy(
 
     run = 0
     obs = env.reset()
+    state = None
+    episode_starts = np.ones((env.num_envs,), dtype=bool)
     get_logger().info(f"Starting {num_runs} evaluation run(s)...")
     while run < num_runs:
         # get number of parameters
-        action, _ = model.predict(obs, deterministic=True)
+        action, state = model.predict(
+            obs,
+            state=state,
+            episode_start=episode_starts,
+            deterministic=True,
+        )
         obs, _, done, _ = env.step(action)
+        episode_starts = np.asarray(done, dtype=bool).reshape(-1)
 
-        if done:
+        if np.any(episode_starts):
             get_logger().info(
                 f"Run {run} done. "
                 f"Cumulative reward: {cambrian_env.stashed_cumulative_reward}"

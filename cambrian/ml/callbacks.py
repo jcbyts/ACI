@@ -30,7 +30,7 @@ from cambrian.ml.behavior_audit import (
     save_behavior_audit,
     thresholds_to_dict,
 )
-from cambrian.ml.model import MjCambrianModel
+from cambrian.ml.model import MjCambrianModel, MjCambrianRecurrentModel
 from cambrian.utils.logger import get_logger
 
 
@@ -338,6 +338,12 @@ class MjCambrianPPODiagnosticsCallback(BaseCallback):
 
         if self.logfile.exists():
             self.logfile.unlink()
+
+    def _init_callback(self) -> None:
+        if isinstance(self.model, MjCambrianRecurrentModel):
+            raise RuntimeError(
+                "MjCambrianPPODiagnosticsCallback is not recurrent-policy compatible."
+            )
 
     @staticmethod
     def _swap_and_flatten(arr: np.ndarray) -> np.ndarray:

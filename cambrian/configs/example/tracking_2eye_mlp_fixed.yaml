@@ -1,0 +1,10 @@
+# @package _global_
+
+# Geometry-only control: original tracking task and feed-forward MLP, replacing the
+# three fixed eyes with a pixel/acuity/coverage-matched fixed binocular retina.
+defaults:
+  - example
+  - override /task: tracking
+  - override /env/agents/eyes@env.agents.agent.eyes.eye: binocular_matched_fixed
+
+expname: tracking_2eye_mlp_fixed_seed${seed}

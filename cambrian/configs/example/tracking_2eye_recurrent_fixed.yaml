@@ -1,0 +1,21 @@
+# @package _global_
+
+# Policy/encoder control: same fixed binocular task as tracking_2eye_mlp_fixed, but
+# replace frame stacking + MLP PPO with a spatial CNN and recurrent PPO.
+defaults:
+  - tracking_2eye_mlp_fixed
+  - override /trainer/model: recurrent_ppo
+
+expname: tracking_2eye_recurrent_fixed_seed${seed}
+
+trainer:
+  wrappers:
+    frame_stack_wrapper: null
+    constant_action_wrapper: null
+  callbacks:
+    eval_callback:
+      callback_after_eval:
+        callbacks:
+          stop_training_on_no_improvement_callback:
+            min_evals: 10
+            max_no_improvement_evals: 20

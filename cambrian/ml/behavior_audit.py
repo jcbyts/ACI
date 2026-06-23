@@ -21,6 +21,10 @@ class BehaviorGateThresholds:
     max_median_distance: float = 5.0
     max_contact_fraction: float = 0.0
     max_near_border_fraction: float = 0.25
+    max_loopiness: float | None = 10.0
+    max_near_zero_speed_command_fraction: float | None = 0.8
+    min_physical_speed_command_mean: float | None = 0.03
+    max_action_delta_p95_abs: float | None = 1.0
 
 
 def _first_scalar(value: Any) -> float:
@@ -92,6 +96,17 @@ def summarize_episode(samples: list[dict[str, Any]]) -> dict[str, Any]:
     contact_pair_counts = Counter(
         pair for sample in samples for pair in sample.get("contact_pairs", [])
     )
+    total_path = float(np.sum(deltas)) if len(deltas) else 0.0
+    net_displacement = float(np.linalg.norm(agent[-1] - agent[0]))
+    action_delta = np.diff(actions, axis=0)
+    if len(action_delta):
+        action_delta_abs_mean = np.abs(action_delta).mean(axis=0).round(4).tolist()
+        action_delta_p95_abs = (
+            np.percentile(np.abs(action_delta), 95, axis=0).round(4).tolist()
+        )
+    else:
+        action_delta_abs_mean = np.zeros(actions.shape[1], dtype=np.float64).tolist()
+        action_delta_p95_abs = np.zeros(actions.shape[1], dtype=np.float64).tolist()
 
     summary = {
         "steps": len(samples),
@@ -103,8 +118,9 @@ def summarize_episode(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "median_distance": float(np.median(distances)),
         "min_distance": float(np.min(distances)),
         "near_goal_fraction": float(np.mean(distances < 1.25)),
-        "total_path": float(np.sum(deltas)) if len(deltas) else 0.0,
-        "net_displacement": float(np.linalg.norm(agent[-1] - agent[0])),
+        "total_path": total_path,
+        "net_displacement": net_displacement,
+        "loopiness": total_path / max(net_displacement, 1e-6),
         "stationary_fraction": float(np.mean(deltas < 0.02)) if len(deltas) else 0.0,
         "goal_total_path": float(np.sum(goal_deltas)) if len(goal_deltas) else 0.0,
         "goal_mean_step": float(np.mean(goal_deltas)) if len(goal_deltas) else 0.0,
@@ -119,6 +135,8 @@ def summarize_episode(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "action_mean": actions.mean(axis=0).round(4).tolist(),
         "action_min": actions.min(axis=0).round(4).tolist(),
         "action_max": actions.max(axis=0).round(4).tolist(),
+        "action_delta_abs_mean": action_delta_abs_mean,
+        "action_delta_p95_abs": action_delta_p95_abs,
         "speed_action_mean": float(np.mean(actions[:, 0])) if actions.size else 0.0,
         "speed_action_min": float(np.min(actions[:, 0])) if actions.size else 0.0,
         "speed_action_max": float(np.max(actions[:, 0])) if actions.size else 0.0,
@@ -153,6 +171,7 @@ def audit_policy_behavior(
     *,
     n_episodes: int,
     deterministic: bool = True,
+    reset_state_every_step: bool = False,
 ) -> dict[str, Any]:
     """Run deterministic policy rollouts and summarize pursuit behavior."""
     # Step the raw eval environment instead of VecEnv.step(). DummyVecEnv auto-resets
@@ -161,11 +180,22 @@ def audit_policy_behavior(
     raw_env = env.envs[0]
     cambrian_env = raw_env.unwrapped
     obs, _ = raw_env.reset()
+    state = None
+    episode_start = np.ones((1,), dtype=bool)
     episodes: list[dict[str, Any]] = []
     current: list[dict[str, Any]] = []
 
     while len(episodes) < n_episodes:
-        action, _ = model.predict(obs, deterministic=deterministic)
+        predict_state = None if reset_state_every_step else state
+        predict_episode_start = (
+            np.ones((1,), dtype=bool) if reset_state_every_step else episode_start
+        )
+        action, state = model.predict(
+            obs,
+            state=predict_state,
+            episode_start=predict_episode_start,
+            deterministic=deterministic,
+        )
         obs, reward, terminated, truncated, info = raw_env.step(action)
 
         agent = cambrian_env.agents["agent"]
@@ -186,6 +216,7 @@ def audit_policy_behavior(
             )
         )
         done_bool = bool(terminated or truncated)
+        episode_start[:] = done_bool
 
         current.append(
             {
@@ -208,6 +239,33 @@ def audit_policy_behavior(
             current = []
             obs, _ = raw_env.reset()
 
+    return build_behavior_audit(
+        episodes,
+        reset_state_every_step=reset_state_every_step,
+    )
+
+
+def _episode_loopiness(episode: dict[str, Any]) -> float:
+    if "loopiness" in episode:
+        return float(episode["loopiness"])
+    return float(episode.get("total_path", 0.0)) / max(
+        float(episode.get("net_displacement", 0.0)),
+        1e-6,
+    )
+
+
+def _episode_action_delta_p95(episode: dict[str, Any]) -> float:
+    values = episode.get("action_delta_p95_abs", [])
+    if not values:
+        return 0.0
+    return float(np.max(np.asarray(values, dtype=np.float64)))
+
+
+def build_behavior_audit(
+    episodes: list[dict[str, Any]],
+    *,
+    reset_state_every_step: bool = False,
+) -> dict[str, Any]:
     captures = [episode.get("captures", 0) for episode in episodes]
     stationary = [episode.get("stationary_fraction", 1.0) for episode in episodes]
     median_distance = [episode.get("median_distance", np.inf) for episode in episodes]
@@ -215,9 +273,16 @@ def audit_policy_behavior(
     episode_contact = [episode.get("had_contact", True) for episode in episodes]
     terminal_contact = [episode.get("terminal_contact", True) for episode in episodes]
     border = [episode.get("near_border_fraction", 0.0) for episode in episodes]
+    loopiness = [_episode_loopiness(episode) for episode in episodes]
+    zero_speed = [
+        episode.get("near_zero_speed_command_fraction", 1.0) for episode in episodes
+    ]
+    speed = [episode.get("physical_speed_command_mean", 0.0) for episode in episodes]
+    action_delta_p95 = [_episode_action_delta_p95(episode) for episode in episodes]
 
     return {
         "n_episodes": len(episodes),
+        "reset_state_every_step": reset_state_every_step,
         "mean_captures": float(np.mean(captures)) if captures else 0.0,
         "all_episodes_captured": bool(all(capture > 0 for capture in captures)),
         "mean_stationary_fraction": float(np.mean(stationary)) if stationary else 1.0,
@@ -232,6 +297,14 @@ def audit_policy_behavior(
             float(np.mean(terminal_contact)) if terminal_contact else 1.0
         ),
         "max_near_border_fraction": float(np.max(border)) if border else 0.0,
+        "max_loopiness": float(np.max(loopiness)) if loopiness else float("inf"),
+        "max_near_zero_speed_command_fraction": (
+            float(np.max(zero_speed)) if zero_speed else 1.0
+        ),
+        "mean_physical_speed_command_mean": float(np.mean(speed)) if speed else 0.0,
+        "max_action_delta_p95_abs": (
+            float(np.max(action_delta_p95)) if action_delta_p95 else 0.0
+        ),
         "episodes": episodes,
     }
 
@@ -273,6 +346,36 @@ def evaluate_behavior_gate(
             f"{audit['max_near_border_fraction']:.3f} > "
             f"{thresholds.max_near_border_fraction:.3f}"
         )
+    if thresholds.max_loopiness is not None:
+        max_loopiness = audit.get("max_loopiness", float("inf"))
+        if max_loopiness > thresholds.max_loopiness:
+            failures.append(
+                "max_loopiness "
+                f"{max_loopiness:.3f} > {thresholds.max_loopiness:.3f}"
+            )
+    if thresholds.max_near_zero_speed_command_fraction is not None:
+        max_zero_speed = audit.get("max_near_zero_speed_command_fraction", 1.0)
+        if max_zero_speed > thresholds.max_near_zero_speed_command_fraction:
+            failures.append(
+                "max_near_zero_speed_command_fraction "
+                f"{max_zero_speed:.3f} > "
+                f"{thresholds.max_near_zero_speed_command_fraction:.3f}"
+            )
+    if thresholds.min_physical_speed_command_mean is not None:
+        mean_speed = audit.get("mean_physical_speed_command_mean", 0.0)
+        if mean_speed < thresholds.min_physical_speed_command_mean:
+            failures.append(
+                "mean_physical_speed_command_mean "
+                f"{mean_speed:.3f} < "
+                f"{thresholds.min_physical_speed_command_mean:.3f}"
+            )
+    if thresholds.max_action_delta_p95_abs is not None:
+        max_delta = audit.get("max_action_delta_p95_abs", 0.0)
+        if max_delta > thresholds.max_action_delta_p95_abs:
+            failures.append(
+                "max_action_delta_p95_abs "
+                f"{max_delta:.3f} > {thresholds.max_action_delta_p95_abs:.3f}"
+            )
     return not failures, failures
 
 

@@ -1,0 +1,9 @@
+defaults:
+  - binocular_matched_fixed
+
+# Zero joint angle reproduces the matched fixed-eye geometry above.
+actuated: true
+pan_range: [-45, 45]
+tilt_range: [-30, 30]
+actuator_kp: 0.5
+joint_damping: 0.1

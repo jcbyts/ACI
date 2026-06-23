@@ -56,10 +56,10 @@ class MjCambrianEyeConfig(HydraContainerConfig):
 
         noise_std (float): Standard deviation of the Gaussian noise to be added to
             the rendered image. If 0, no noise is applied.
-        integration_factor (float): Factor in [0, 1] controlling exponential
-            smoothing of the eye observation. Higher values retain more of the
-            previous observation, which suppresses noise, adds motion blur during
-            movement, and encourages fixation.
+        integration_factor (float): Factor in [0, 1] controlling first-order temporal
+            integration. Higher values retain more of the previous observation. The
+            update is deliberately independent of image motion so the sensor model does
+            not build the desired fixation behavior into the observation function.
 
         actuated (bool): Whether the eye is mounted on a 2-DOF (pan/tilt) gimbal with
             position-servo actuators. If True, `generate_xml` builds a small massless
@@ -123,6 +123,14 @@ class MjCambrianEye:
     ):
         self._config = config
         self._name = name
+
+        if not 0.0 <= self._config.integration_factor <= 1.0:
+            raise ValueError(
+                "integration_factor must be in [0, 1], got "
+                f"{self._config.integration_factor}"
+            )
+        if self._config.noise_std < 0.0:
+            raise ValueError(f"noise_std must be non-negative, got {self._config.noise_std}")
 
         self._renders_rgb = "rgb_array" in self._config.renderer.render_modes
         self._renders_depth = "depth_array" in self._config.renderer.render_modes
@@ -405,27 +413,14 @@ class MjCambrianEye:
         return torch.clamp(obs + noise, 0, 1)
 
     def _integrate_observation(self, obs: ObsType) -> ObsType:
-        """Motion-adaptive temporal integration that promotes fixation.
+        """Apply a motion-independent first-order temporal low-pass filter.
 
-        The integration factor serves dual purposes:
-
-        1. **Noise reduction during fixation**: When the scene is static (agent fixating),
-           noise from the current frame is averaged with previous frames, gradually
-           producing a cleaner, denoised image. This rewards staying still.
-
-        2. **Motion blur penalty**: When the scene changes (agent moving), old content
-           persists and blends with new content, creating visible motion blur that
-           degrades image quality. This penalizes movement.
-
-        Motion-adaptive behavior:
-        - Low motion (fixating): Uses base integration_factor for noise reduction
-        - High motion (moving): Increases integration to amplify blur penalty
-
-        Parameters to tune:
-        - integration_factor=0.0: No effect (instant update)
-        - integration_factor=0.3-0.5: Subtle denoising + light blur
-        - integration_factor=0.6-0.8: Strong denoising + noticeable blur
-        - integration_factor=0.9+: Heavy denoising + severe blur (strong fixation incentive)
+        ``integration_factor`` is the fraction of the previous sensor state retained at
+        each environment step.  A value of zero is an instantaneous sensor; a value of
+        one freezes the first observation.  Because the coefficient does not depend on
+        frame-to-frame image change, any fixation behavior must be learned from the
+        consequences of the sensor dynamics rather than being explicitly amplified by
+        this function.
         """
 
         alpha = self._config.integration_factor
@@ -433,17 +428,7 @@ class MjCambrianEye:
         if alpha == 0.0 or not self._has_prev_obs:
             return obs
 
-        # Measure frame-to-frame difference (motion detection)
-        motion_level = torch.mean(torch.abs(obs - self._prev_obs)).clamp(0.0, 1.0)
-
-        # Motion-adaptive blending:
-        # - Static (low motion): Use base alpha for noise reduction
-        # - Moving (high motion): Increase alpha to amplify motion blur penalty
-        # The multiplier (1.0 + motion_level) increases integration during motion
-        effective_alpha = torch.clamp(alpha * (1.0 + 0.5 * motion_level), 0.0, 1.0)
-
-        # Exponential moving average: more previous frame retention = more blur/smoothing
-        return (effective_alpha * self._prev_obs) + ((1 - effective_alpha) * obs)
+        return (alpha * self._prev_obs) + ((1.0 - alpha) * obs)
 
     def render(self) -> List[MjCambrianViewerOverlay]:
         """Render the image from the camera. Will always only return the rgb array.

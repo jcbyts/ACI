@@ -1,0 +1,4 @@
+_target_: cambrian.ml.model.MjCambrianRecurrentModel.load
+_partial_: true
+
+path: ${path:${expdir}, best_model}

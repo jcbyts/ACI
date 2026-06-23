@@ -31,6 +31,25 @@ Computational methods unveil intricate processes of visual system evolution by s
 
 </div>
 
+## Audited binocular tracking workflow
+
+This cleanup adds an explicit four-stage path from the original three-eye MLP tracking
+baseline to independently actuated binocular recurrent PPO. The task remains the
+original moving-goal plus moving-adversary `tracking` task; sensor noise, temporal
+integration, reward shaping, and goal-only mazes are excluded from the baseline.
+
+```bash
+bash scripts/run_tracking_baseline.sh original-3eye-mlp seed=0
+bash scripts/run_tracking_baseline.sh fixed-2eye-mlp seed=0
+bash scripts/run_tracking_baseline.sh fixed-2eye-rppo seed=0
+bash scripts/run_tracking_baseline.sh actuated-2eye-rppo seed=0
+```
+
+See [`docs/experiment_contract.md`](docs/experiment_contract.md) for the exact task,
+observation, action, geometry, evaluation, and artifact requirements. See
+[`docs/repository_audit_2026-06-22.md`](docs/repository_audit_2026-06-22.md) for the
+evidence behind the cleanup.
+
 ## Setup
 
 ### Prerequisites

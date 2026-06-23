@@ -1,3 +1,5 @@
+# Historical compatibility only: this extractor ends in global average pooling and
+# is not a valid localization baseline for binocular tracking. Use spatial_cnn*.
 defaults:
   - combined
 

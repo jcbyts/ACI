@@ -45,6 +45,10 @@ class MjCambrianAgentPoint(MjCambrianAgent2D):
         super().__init__(config, name)
 
         self._kp = kp
+        # Keep the exact action supplied by the policy.  ``MjCambrianAgent`` stores the
+        # translated MuJoCo actuator command in ``_last_action``; that is not an
+        # efference copy of the policy action for point agents.
+        self._last_policy_action = np.zeros(2, dtype=np.float32)
 
         assert np.all(self._actuators[0].ctrlrange == self._actuators[1].ctrlrange), (
             f"Forward velocity and lateral velocity must have the same control range, "
@@ -57,13 +61,8 @@ class MjCambrianAgentPoint(MjCambrianAgent2D):
         """Creates the entire obs dict."""
         obs = super()._update_obs(obs)
 
-        # Update the action obs
-        # Calculate the global velocities
         if self._config.use_action_obs:
-            v, theta = self._calc_v_theta(self._last_action)
-            v = np.interp(v, self._v_ctrlrange, [-1, 1])
-            theta = np.interp(theta, self._theta_ctrlrange, [-1, 1])
-            obs["action"] = np.array([v, theta], dtype=np.float32)
+            obs["action"] = self._last_policy_action.copy()
 
         return obs
 
@@ -77,7 +76,14 @@ class MjCambrianAgentPoint(MjCambrianAgent2D):
     def apply_action(self, action: ActionType):
         """Calls the appropriate apply action method based on the heading joint type."""
         assert len(action) == 2, f"Action must have two elements, got {len(action)}."
-        super().apply_action(self._body_ctrl_from_action(action))
+        self._last_policy_action = np.asarray(action, dtype=np.float32).copy()
+        super().apply_action(self._body_ctrl_from_action(self._last_policy_action))
+
+    def reset(self, *args) -> ObsType:
+        """Reset the policy-space efference copy before producing the first obs."""
+
+        self._last_policy_action = np.zeros(self.action_space.shape, dtype=np.float32)
+        return super().reset(*args)
 
     def _body_ctrl_from_action(self, action: ActionType) -> ActionType:
         """Map [forward_velocity, heading] to the underlying body actuators."""
@@ -88,6 +94,12 @@ class MjCambrianAgentPoint(MjCambrianAgent2D):
         vy = v * np.sin(current_heading)
 
         return [vx, vy, action[1]]
+
+    @property
+    def last_action(self) -> ActionType:
+        """Return the exact policy-space command used by diagnostics and overlays."""
+
+        return self._last_policy_action
 
     @cached_property
     def action_space(self) -> spaces.Space:
@@ -142,12 +154,37 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
             2 if self._eye_action_mode == "yoked" else self._n_eye_actuators
         )
         self._last_eye_action = np.zeros(self._eye_action_size, dtype=np.float32)
+        self._last_policy_action = np.zeros(
+            2 + self._eye_action_size, dtype=np.float32
+        )
 
     @property
     def _eye_actuators(self):
         """The eye gimbal actuators (everything after the body actuators). Populated
         after reset, when self._actuators reflects the full model."""
         return self._actuators[self._N_BODY_ACTUATORS :]
+
+    def _eye_joint_state_obs(self) -> np.ndarray:
+        """Return normalized physical eye joint positions and velocities."""
+        if self._n_eye_actuators <= 0:
+            return np.zeros(0, dtype=np.float32)
+
+        qpos: list[float] = []
+        qvel: list[float] = []
+        for actuator in self._eye_actuators:
+            joint_id = int(actuator.trnadr)
+            qpos_adr = int(self._spec.model.jnt_qposadr[joint_id])
+            qvel_adr = int(self._spec.model.jnt_dofadr[joint_id])
+            value = float(self._spec.data.qpos[qpos_adr])
+            velocity = float(self._spec.data.qvel[qvel_adr])
+            if actuator.ctrllimited:
+                value = float(np.interp(value, actuator.ctrlrange, [-1.0, 1.0]))
+                scale = float(np.max(np.abs(actuator.ctrlrange)))
+                if scale > 1e-8:
+                    velocity = velocity / scale
+            qpos.append(float(np.clip(value, -5.0, 5.0)))
+            qvel.append(float(np.clip(velocity, -5.0, 5.0)))
+        return np.asarray([*qpos, *qvel], dtype=np.float32)
 
     def apply_action(self, action: ActionType):
         """Applies a [v, theta, *eye] action.
@@ -161,13 +198,17 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
             f"(2 body + {n_eye} eye), got {len(action)}."
         )
 
+        self._last_policy_action = np.asarray(action, dtype=np.float32).copy()
+
         # Body: forward velocity + heading -> global vx, vy + yaw position. Use the
         # same body-control helper as the non-eye point agent, but write only the body
         # actuators so the eye actuators can be set explicitly below.
-        MjCambrianAgent.apply_action(self, self._body_ctrl_from_action(action[:2]))
+        MjCambrianAgent.apply_action(
+            self, self._body_ctrl_from_action(self._last_policy_action[:2])
+        )
 
         # Eyes: absolute pan/tilt position control. action is normalized [-1, 1].
-        self._last_eye_action = np.asarray(action[2:], dtype=np.float32)
+        self._last_eye_action = self._last_policy_action[2:].copy()
         eye_ctrl = self._map_eye_action(self._last_eye_action)
         for a, actuator in zip(eye_ctrl, self._eye_actuators):
             if actuator.ctrllimited:
@@ -211,14 +252,23 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
         obs = MjCambrianAgent._update_obs(self, obs)
 
         if self._config.use_action_obs:
-            v, theta = self._calc_v_theta(self._last_action[:3])
-            v = np.interp(v, self._v_ctrlrange, [-1, 1])
-            theta = np.interp(theta, self._theta_ctrlrange, [-1, 1])
-            obs["action"] = np.concatenate(
-                [[v, theta], self._last_eye_action]
-            ).astype(np.float32)
+            obs["action"] = self._last_policy_action.copy()
+        if self._config.use_eye_state_obs:
+            obs["eye_state"] = self._eye_joint_state_obs()
 
         return obs
+
+    @cached_property
+    def observation_space(self) -> spaces.Space:
+        observation_space = super().observation_space
+        if self._config.use_eye_state_obs and self._n_eye_actuators > 0:
+            observation_space.spaces["eye_state"] = spaces.Box(
+                low=-5.0,
+                high=5.0,
+                shape=(2 * self._n_eye_actuators,),
+                dtype=np.float32,
+            )
+        return observation_space
 
     @cached_property
     def action_space(self) -> spaces.Space:

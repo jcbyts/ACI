@@ -1,0 +1,20 @@
+defaults:
+  - policy_kwargs: spatial_cnn_light_shared_lstm
+
+_target_: cambrian.ml.model.MjCambrianRecurrentModel
+_partial_: true
+_convert_: all
+
+policy: MultiInputLstmPolicy
+
+n_steps: 256
+batch_size: 256
+n_epochs: 4
+
+learning_rate: 2.5e-4
+gamma: 0.99
+gae_lambda: 0.95
+clip_range: 0.2
+ent_coef: 0.01
+vf_coef: 0.5
+max_grad_norm: 0.5

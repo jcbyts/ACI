@@ -1,0 +1,26 @@
+defaults:
+  - multi_eye
+
+# Two-eye replacement for the original three-eye tracking retina.
+#
+# Original: 3 * (20 x 20), horizontal centers [-30, 0, 30], 45 deg FOV.
+# This config: 2 * (20 x 30), centers [-18.75, 18.75], 67.5 deg horizontal FOV.
+# Both have 1200 RGB pixels, 2.25 deg/pixel, 105 deg horizontal union coverage,
+# and 30 deg total binocular/adjacent overlap.
+num_eyes: [1, 2]
+lat_range: [0, 0]
+lon_range: [-18.75, 18.75]
+gaze_lat_range: [0, 0]
+gaze_lon_range: [-18.75, 18.75]
+
+fov: [45, 67.5]
+focal: [0.01, 0.01]
+sensorsize:
+  - ${eval:'2 * ${..focal.0} * math.tan(math.radians(${..fov.0}) / 2)'}
+  - ${eval:'2 * ${..focal.1} * math.tan(math.radians(${..fov.1}) / 2)'}
+resolution: [20, 30]
+
+actuated: false
+noise_std: 0.0
+integration_factor: 0.0
+flatten_observations: false

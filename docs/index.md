@@ -9,6 +9,8 @@ Home <self>
 examples/index
 usage/index
 reference/index
+experiment_contract
+repository_audit_2026-06-22
 contributing
 ```
 

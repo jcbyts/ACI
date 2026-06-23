@@ -1,6 +1,0 @@
-- example=tracking
-- env.agents.agent.eyes.eye.num_eyes=[1,1]
-- env.agents.agent.eyes.eye.fov=[105,105]
-- env.agents.agent.eyes.eye.resolution=[35,35]
-- expname=exp_m2_obs_check
-- trainer.n_envs=1
