@@ -1,0 +1,15 @@
+defaults:
+  - combined
+
+# Shared-eye R(2+1)D retinal encoder used in front of ordinary feed-forward PPO.
+# Frame stacking must remain enabled; the encoder consumes the temporal axis directly.
+features_extractor_kwargs:
+  image_extractor:
+    _target_: cambrian.ml.features_extractors.MjCambrianR2Plus1DExtractor
+    _partial_: true
+    stem_channels: 24
+    block_channels: [32, 48, 48]
+    temporal_channels: 32
+    latent_channels: 24
+    norm_groups: 8
+    code_mode: signed_silu

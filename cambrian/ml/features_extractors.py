@@ -1,13 +1,13 @@
 """Custom feature extractors used by the PPO policies.
 
 Cambrian eye observations are emitted in channels-last form (``H, W, C``), while
-``torch.nn.Conv2d`` requires channels-first tensors (``C, H, W``).  Stable
-Baselines normally inserts a transpose wrapper for uint8 images, but Cambrian's
+``torch.nn.Conv2d`` and ``torch.nn.Conv3d`` require channels-first tensors.
+Stable Baselines normally inserts a transpose wrapper for uint8 images, but Cambrian's
 retinal observations are normalized float tensors.  Consequently, layout handling
 must be explicit here rather than delegated to SB3.
 """
 
-from typing import Dict, List, Sequence
+from typing import Dict, List, Sequence, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -492,6 +492,527 @@ class MjCambrianCoordCNNExtractor(MjCambrianImageFeaturesExtractor):
         encodings = self.linear(self.cnn(observations))
         encodings = encodings.reshape(B, -1)
         return super().forward(encodings)
+
+
+class _R2Plus1DResidualBlock(torch.nn.Module):
+    """Lightweight residual video block with factorized space/time filtering.
+
+    The spatial and temporal operations are separated so that an activation lies
+    between them.  This is cheaper than a monolithic 3-D convolution and makes the
+    temporal operation explicit.  GroupNorm is used instead of BatchNorm because PPO
+    minibatches are correlated and non-stationary, and because train/eval behavior
+    should not depend on running batch statistics.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        *,
+        norm_groups: int,
+        spatial_stride: int = 1,
+        temporal_stride: int = 1,
+    ) -> None:
+        super().__init__()
+
+        if spatial_stride < 1 or temporal_stride < 1:
+            raise ValueError("Residual-block strides must be positive integers.")
+        for channels in (in_channels, out_channels):
+            if channels % norm_groups != 0:
+                raise ValueError(
+                    f"norm_groups={norm_groups} must divide channels={channels}."
+                )
+
+        self.norm1 = torch.nn.GroupNorm(norm_groups, in_channels)
+        self.spatial = torch.nn.Conv3d(
+            in_channels,
+            out_channels,
+            kernel_size=(1, 3, 3),
+            stride=(1, spatial_stride, spatial_stride),
+            padding=(0, 1, 1),
+            bias=False,
+        )
+        self.norm2 = torch.nn.GroupNorm(norm_groups, out_channels)
+        self.temporal = torch.nn.Conv3d(
+            out_channels,
+            out_channels,
+            kernel_size=(3, 1, 1),
+            stride=(temporal_stride, 1, 1),
+            padding=(1, 0, 0),
+            bias=False,
+        )
+
+        if (
+            in_channels != out_channels
+            or spatial_stride != 1
+            or temporal_stride != 1
+        ):
+            self.projection = torch.nn.Conv3d(
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                stride=(temporal_stride, spatial_stride, spatial_stride),
+                bias=False,
+            )
+        else:
+            self.projection = torch.nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        residual = self.projection(x)
+        x = torch.nn.functional.silu(self.norm1(x))
+        x = self.spatial(x)
+        x = torch.nn.functional.silu(self.norm2(x))
+        x = self.temporal(x)
+        return x + residual
+
+
+class MjCambrianR2Plus1DExtractor(BaseFeaturesExtractor):
+    """Shared-eye spatiotemporal retinal encoder for frame-stacked PPO.
+
+    Input observations must be frame-stacked in ``[T, C, H, W]`` form after the
+    combined extractor performs the channels-last conversion.  The forward pass
+    receives ``[B, T, C, H, W]`` and explicitly permutes it to the Conv3d layout
+    ``[B, C, T, H, W]``.  Temporal adjacency is therefore preserved rather than
+    flattening the frame axis into the batch axis.
+
+    The encoder uses residual R(2+1)D blocks, GroupNorm, and SiLU.  It performs a
+    learned temporal collapse and a learned spatial projection, then flattens the
+    remaining retinotopic map without global pooling.  When used with
+    ``MjCambrianCombinedExtractor(..., share_image_extractor=True)``, the same module
+    and weights encode both eyes, while the two flattened outputs remain separate in
+    the combined feature vector.
+
+    ``code_mode`` controls only the final retinal code:
+
+    - ``signed_silu``: signed, smooth code used for the initial architecture test.
+    - ``identity``: unconstrained signed linear code.
+    - ``on_off_relu``: non-negative ON/OFF split with a fixed total channel count.
+    """
+
+    _VALID_CODE_MODES = {"signed_silu", "identity", "on_off_relu"}
+
+    def __init__(
+        self,
+        observation_space: gym.Space,
+        *,
+        stem_channels: int = 24,
+        block_channels: Sequence[int] = (32, 48, 48),
+        temporal_channels: int = 32,
+        latent_channels: int = 24,
+        norm_groups: int = 8,
+        code_mode: str = "signed_silu",
+    ) -> None:
+        if len(observation_space.shape) != 4:
+            raise ValueError(
+                "MjCambrianR2Plus1DExtractor requires a frame-stacked image space "
+                "with shape [T,C,H,W]. Keep the frame-stack wrapper enabled. Got "
+                f"shape {observation_space.shape}."
+            )
+
+        n_frames, n_channels, height, width = observation_space.shape
+        if min(n_frames, n_channels, height, width) <= 0:
+            raise ValueError(
+                f"Invalid stacked image shape {observation_space.shape}: all axes "
+                "must be positive."
+            )
+        if n_frames < 3:
+            raise ValueError(
+                "The spatiotemporal encoder requires at least three stacked frames; "
+                f"got {n_frames}."
+            )
+        if len(block_channels) != 3:
+            raise ValueError(
+                "block_channels must contain exactly three channel sizes: one "
+                "spatial-downsampling block, one temporal-downsampling block, and "
+                "one refinement block."
+            )
+        if code_mode not in self._VALID_CODE_MODES:
+            raise ValueError(
+                f"Unknown code_mode={code_mode!r}; expected one of "
+                f"{sorted(self._VALID_CODE_MODES)}."
+            )
+        if code_mode == "on_off_relu" and latent_channels % 2 != 0:
+            raise ValueError(
+                "latent_channels must be even when code_mode='on_off_relu' so the "
+                "ON and OFF populations have equal size."
+            )
+
+        if norm_groups <= 0:
+            raise ValueError("norm_groups must be positive.")
+
+        normalized_channels = [
+            stem_channels,
+            *block_channels,
+            temporal_channels,
+        ]
+        for channels in normalized_channels:
+            if channels <= 0:
+                raise ValueError("All encoder channel counts must be positive.")
+            if channels % norm_groups != 0:
+                raise ValueError(
+                    f"norm_groups={norm_groups} must divide channels={channels}."
+                )
+        if latent_channels <= 0:
+            raise ValueError("latent_channels must be positive.")
+
+        # The precise flattened size is inferred from the actual network below.
+        super().__init__(observation_space, features_dim=1)
+
+        self._input_shape = tuple(int(v) for v in observation_space.shape)
+        self.code_mode = code_mode
+
+        self.spatial_stem = torch.nn.Sequential(
+            torch.nn.Conv3d(
+                n_channels,
+                stem_channels,
+                kernel_size=(1, 5, 5),
+                stride=(1, 2, 2),
+                padding=(0, 2, 2),
+                bias=False,
+            ),
+            torch.nn.GroupNorm(norm_groups, stem_channels),
+            torch.nn.SiLU(),
+        )
+        self.temporal_stem = torch.nn.Sequential(
+            torch.nn.Conv3d(
+                stem_channels,
+                stem_channels,
+                kernel_size=(3, 1, 1),
+                stride=1,
+                padding=(1, 0, 0),
+                bias=False,
+            ),
+            torch.nn.GroupNorm(norm_groups, stem_channels),
+            torch.nn.SiLU(),
+        )
+
+        c0, c1, c2 = (int(v) for v in block_channels)
+        self.residual_blocks = torch.nn.Sequential(
+            _R2Plus1DResidualBlock(
+                stem_channels,
+                c0,
+                norm_groups=norm_groups,
+                spatial_stride=2,
+            ),
+            _R2Plus1DResidualBlock(
+                c0,
+                c1,
+                norm_groups=norm_groups,
+                temporal_stride=2,
+            ),
+            _R2Plus1DResidualBlock(
+                c1,
+                c2,
+                norm_groups=norm_groups,
+            ),
+        )
+        self.pre_collapse = torch.nn.Sequential(
+            torch.nn.GroupNorm(norm_groups, c2),
+            torch.nn.SiLU(),
+        )
+
+        # Infer the remaining temporal extent and collapse it with a learned kernel.
+        with torch.no_grad():
+            sample = torch.zeros(1, n_channels, n_frames, height, width)
+            sample = self._forward_trunk(sample)
+            remaining_frames = int(sample.shape[2])
+        if remaining_frames <= 0:
+            raise ValueError(
+                "The configured encoder collapsed the temporal axis before the "
+                "learned temporal projection."
+            )
+
+        self.temporal_collapse = torch.nn.Sequential(
+            torch.nn.Conv3d(
+                c2,
+                temporal_channels,
+                kernel_size=(remaining_frames, 1, 1),
+                bias=False,
+            ),
+            torch.nn.GroupNorm(norm_groups, temporal_channels),
+            torch.nn.SiLU(),
+        )
+
+        signed_channels = (
+            latent_channels // 2 if code_mode == "on_off_relu" else latent_channels
+        )
+        self.spatial_projection = torch.nn.Conv2d(
+            temporal_channels,
+            signed_channels,
+            kernel_size=(2, 3),
+            stride=1,
+            padding=0,
+        )
+
+        with torch.no_grad():
+            sample = torch.zeros(1, n_frames, n_channels, height, width)
+            retinal_code = self.encode_retinal_map(sample)
+        if retinal_code.shape[-2] <= 0 or retinal_code.shape[-1] <= 0:
+            raise ValueError(
+                "The configured encoder produced a non-positive spatial output size."
+            )
+
+        self.retinal_code_shape = tuple(int(v) for v in retinal_code.shape[1:])
+        self._features_dim = int(retinal_code[0].numel())
+
+    def _forward_trunk(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.spatial_stem(x)
+        x = self.temporal_stem(x)
+        x = self.residual_blocks(x)
+        return self.pre_collapse(x)
+
+    def encode_retinal_map(self, observations: torch.Tensor) -> torch.Tensor:
+        """Return the unflattened retinal code as ``[B,C,H,W]``."""
+        if observations.dim() != 5:
+            raise ValueError(
+                "Expected stacked retinal observations [B,T,C,H,W], got "
+                f"shape {tuple(observations.shape)}."
+            )
+        if tuple(observations.shape[1:]) != self._input_shape:
+            raise ValueError(
+                "Stacked retinal observation shape changed after initialization: "
+                f"expected [B,{','.join(map(str, self._input_shape))}], got "
+                f"{tuple(observations.shape)}."
+            )
+
+        # CombinedExtractor yields [B,T,C,H,W]; Conv3d requires [B,C,T,H,W].
+        x = observations.permute(0, 2, 1, 3, 4).contiguous()
+        x = self._forward_trunk(x)
+        x = self.temporal_collapse(x)
+        if x.shape[2] != 1:
+            raise RuntimeError(
+                "Learned temporal collapse must produce exactly one time slice; "
+                f"got shape {tuple(x.shape)}."
+            )
+        x = self.spatial_projection(x.squeeze(2))
+
+        if self.code_mode == "signed_silu":
+            return torch.nn.functional.silu(x)
+        if self.code_mode == "identity":
+            return x
+        # Split every signed feature into separate non-negative ON and OFF channels.
+        return torch.cat((torch.relu(x), torch.relu(-x)), dim=1)
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        return torch.flatten(self.encode_retinal_map(observations), start_dim=1)
+
+
+class MjCambrianCyclopeanR2Plus1DExtractor(BaseFeaturesExtractor):
+    """Shared-eye retinal encoding followed by motor-conditioned binocular fusion.
+
+    This extractor consumes the complete frame-stacked ``Dict`` observation.  One
+    shared R(2+1)D encoder maps the two eye clips to separate retinotopic feature maps.
+    The stacked action/efference-copy, eye-state, contact, and other vector observations
+    are encoded into a motor context.  That context FiLM-modulates each eye map before
+    a learned MLP constructs one cyclopean visual-motor representation.
+
+    The default tracking geometry yields one ``[24, 4, 6]`` map per eye.  Eye identity
+    and retinal position remain explicit until the fusion layer; the two maps are never
+    averaged or globally pooled.
+    """
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        *,
+        normalized_image: bool = True,
+        stem_channels: int = 24,
+        block_channels: Sequence[int] = (32, 48, 48),
+        temporal_channels: int = 32,
+        latent_channels: int = 24,
+        norm_groups: int = 8,
+        code_mode: str = "signed_silu",
+        motor_hidden_dim: int = 128,
+        motor_context_dim: int = 64,
+        fusion_hidden_dim: int = 256,
+        cyclopean_dim: int = 192,
+        film_conditioning: bool = True,
+    ) -> None:
+        if not isinstance(observation_space, spaces.Dict):
+            raise TypeError(
+                "MjCambrianCyclopeanR2Plus1DExtractor requires a Dict observation "
+                f"space, got {type(observation_space).__name__}."
+            )
+        for name, value in {
+            "motor_hidden_dim": motor_hidden_dim,
+            "motor_context_dim": motor_context_dim,
+            "fusion_hidden_dim": fusion_hidden_dim,
+            "cyclopean_dim": cyclopean_dim,
+        }.items():
+            if value <= 0:
+                raise ValueError(f"{name} must be positive, got {value}.")
+
+        image_keys = [
+            key
+            for key, subspace in observation_space.spaces.items()
+            if is_image_space(subspace, normalized_image=normalized_image)
+        ]
+        if len(image_keys) != 2:
+            raise ValueError(
+                "Cyclopean fusion requires exactly two retinal image keys; found "
+                f"{len(image_keys)}: {image_keys}."
+            )
+
+        # Sorting makes left/right assignment deterministic while preserving identity.
+        self.image_keys: Tuple[str, str] = tuple(  # type: ignore[assignment]
+            sorted(image_keys)
+        )
+        self.motor_keys: Tuple[str, ...] = tuple(
+            sorted(key for key in observation_space.spaces if key not in image_keys)
+        )
+        if len(self.motor_keys) == 0:
+            raise ValueError(
+                "Cyclopean fusion requires vector observations carrying efference "
+                "copy and/or proprioception."
+            )
+
+        self._image_channels_last = {
+            key: _image_channels_last(observation_space[key].shape)
+            for key in self.image_keys
+        }
+        retinal_space = maybe_transpose_space(observation_space[self.image_keys[0]])
+        for key in self.image_keys[1:]:
+            candidate = maybe_transpose_space(observation_space[key])
+            if candidate.shape != retinal_space.shape:
+                raise ValueError(
+                    "Both eyes must have identical stacked image shapes for a shared "
+                    f"encoder; got {retinal_space.shape} and {candidate.shape}."
+                )
+
+        super().__init__(observation_space, features_dim=cyclopean_dim)
+
+        self.retinal_encoder = MjCambrianR2Plus1DExtractor(
+            retinal_space,
+            stem_channels=stem_channels,
+            block_channels=block_channels,
+            temporal_channels=temporal_channels,
+            latent_channels=latent_channels,
+            norm_groups=norm_groups,
+            code_mode=code_mode,
+        )
+        self.retinal_code_shape = self.retinal_encoder.retinal_code_shape
+        retinal_channels = self.retinal_code_shape[0]
+        per_eye_features = int(np.prod(self.retinal_code_shape))
+
+        self.motor_input_dim = sum(
+            int(np.prod(observation_space[key].shape)) for key in self.motor_keys
+        )
+        self.motor_context_dim = motor_context_dim
+        self.motor_encoder = torch.nn.Sequential(
+            torch.nn.Linear(self.motor_input_dim, motor_hidden_dim),
+            torch.nn.LayerNorm(motor_hidden_dim),
+            torch.nn.SiLU(),
+            torch.nn.Linear(motor_hidden_dim, motor_context_dim),
+            torch.nn.LayerNorm(motor_context_dim),
+            torch.nn.SiLU(),
+        )
+
+        self.film_conditioning = film_conditioning
+        if film_conditioning:
+            # Two eyes x (gain, bias) x C channels. Zero initialization makes the
+            # initial transformation exactly identity while gradients can learn how
+            # eye/body motion changes retinal coordinates.
+            self.eye_film: torch.nn.Module | None = torch.nn.Linear(
+                motor_context_dim, 4 * retinal_channels
+            )
+            torch.nn.init.zeros_(self.eye_film.weight)
+            torch.nn.init.zeros_(self.eye_film.bias)
+        else:
+            self.eye_film = None
+
+        fusion_input_dim = 2 * per_eye_features + motor_context_dim
+        self.cyclopean_fusion = torch.nn.Sequential(
+            torch.nn.Linear(fusion_input_dim, fusion_hidden_dim),
+            torch.nn.LayerNorm(fusion_hidden_dim),
+            torch.nn.SiLU(),
+            torch.nn.Linear(fusion_hidden_dim, cyclopean_dim),
+            torch.nn.LayerNorm(cyclopean_dim),
+            torch.nn.SiLU(),
+        )
+
+    def _encode_motor_context(
+        self,
+        observations: TensorDict,
+        *,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        motor_parts = []
+        for key in self.motor_keys:
+            value = observations[key].to(device=device, dtype=dtype)
+            if value.shape[0] != batch_size:
+                raise ValueError(
+                    f"Observation key {key!r} has batch size {value.shape[0]}, "
+                    f"expected {batch_size}."
+                )
+            motor_parts.append(torch.flatten(value, start_dim=1))
+        motor_input = torch.cat(motor_parts, dim=1)
+        if motor_input.shape[1] != self.motor_input_dim:
+            raise ValueError(
+                "Non-image observation shape changed after initialization: expected "
+                f"{self.motor_input_dim} flattened values, got {motor_input.shape[1]}."
+            )
+        return self.motor_encoder(motor_input)
+
+    def encode_components(
+        self, observations: TensorDict
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return eye maps, motor context, and fused cyclopean code.
+
+        Returns:
+            conditioned_maps: ``[B, 2, C, H, W]`` in deterministic eye-key order.
+            motor_context: ``[B, M]``.
+            cyclopean_code: ``[B, D]``.
+        """
+
+        eye_batches = []
+        batch_size: int | None = None
+        for key in self.image_keys:
+            eye = observations[key]
+            if batch_size is None:
+                batch_size = int(eye.shape[0])
+            elif eye.shape[0] != batch_size:
+                raise ValueError("Both retinal observations must share a batch size.")
+            eye_batches.append(
+                maybe_transpose_obs(
+                    eye,
+                    channels_last=self._image_channels_last[key],
+                )
+            )
+        assert batch_size is not None
+
+        # One encoder call guarantees exact weight sharing and efficient GPU use.
+        retinal_maps = self.retinal_encoder.encode_retinal_map(
+            torch.cat(eye_batches, dim=0)
+        )
+        left_map, right_map = retinal_maps.chunk(2, dim=0)
+        conditioned_maps = torch.stack((left_map, right_map), dim=1)
+
+        motor_context = self._encode_motor_context(
+            observations,
+            batch_size=batch_size,
+            device=conditioned_maps.device,
+            dtype=conditioned_maps.dtype,
+        )
+
+        if self.eye_film is not None:
+            channels = conditioned_maps.shape[2]
+            film = self.eye_film(motor_context).reshape(batch_size, 2, 2, channels)
+            # Bounded modulation avoids an unstable scale explosion. At initialization
+            # gain=1 and bias=0 exactly.
+            gain = 1.0 + torch.tanh(film[:, :, 0]).unsqueeze(-1).unsqueeze(-1)
+            bias = torch.tanh(film[:, :, 1]).unsqueeze(-1).unsqueeze(-1)
+            conditioned_maps = gain * conditioned_maps + bias
+
+        fusion_input = torch.cat(
+            (torch.flatten(conditioned_maps, start_dim=1), motor_context), dim=1
+        )
+        cyclopean_code = self.cyclopean_fusion(fusion_input)
+        return conditioned_maps, motor_context, cyclopean_code
+
+    def forward(self, observations: TensorDict) -> torch.Tensor:
+        return self.encode_components(observations)[2]
 
 
 class MjCambrianNatureCNNExtractor(MjCambrianImageFeaturesExtractor):

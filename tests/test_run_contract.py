@@ -87,10 +87,10 @@ def _canonical_config() -> dict:
         "trainer": {
             "model": {
                 "_target_": "cambrian.ml.model.MjCambrianRecurrentModel",
-                "policy": "MultiInputLstmPolicy",
+                "policy": "CyclopeanMultiInputLstmPolicy",
             },
             "wrappers": {
-                "frame_stack_wrapper": None,
+                "frame_stack_wrapper": {"stack_size": 10},
                 "constant_action_wrapper": None,
             },
         },

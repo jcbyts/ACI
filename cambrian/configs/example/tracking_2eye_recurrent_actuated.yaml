@@ -1,15 +1,13 @@
 # @package _global_
 
-# Canonical requested baseline: the unmodified moving-goal + moving-adversary tracking
-# task, matched binocular retinal geometry, independently actuated pan/tilt eyes, and
-# recurrent PPO. No reward shaping, fixed body action, goal-only maze, sensor noise, or
-# temporal integration is introduced here.
+# Same recurrent model as the fixed-eye test, with independent binocular pan/tilt
+# control and physical eye-state observations.
 defaults:
   - tracking_2eye_recurrent_fixed
-  - override /env/agents@env.agents.agent: point_eye
+  - override /env/agents@env.agents.agent: point_yaw_rate_eye
   - override /env/agents/eyes@env.agents.agent.eyes.eye: binocular_matched_actuated
 
-expname: tracking_2eye_recurrent_actuated_seed${seed}
+expname: tracking_2eye_cyclopean_recurrent_actuated_seed${seed}
 
 env:
   agents:

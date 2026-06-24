@@ -1,0 +1,3 @@
+defaults:
+  - spatiotemporal_r2plus1d
+  - shared

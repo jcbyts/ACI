@@ -465,20 +465,24 @@ def _check_resolved_config(config: Mapping[str, Any], checks: list[Check]) -> No
         checks,
         "policy.recurrent_model",
         "recurrent" in model_target.lower() and "lstm" in policy.lower(),
-        expected="MjCambrianRecurrentModel + MultiInputLstmPolicy",
+        expected="MjCambrianRecurrentModel + cyclopean LSTM policy",
         actual={"_target_": model_target, "policy": policy},
-        detail="The requested PPO baseline is recurrent rather than frame-stacked PPO.",
+        detail="The requested PPO baseline must use recurrent sequence training.",
     )
 
     wrappers = _mapping(trainer.get("wrappers"))
-    frame_stack = wrappers.get("frame_stack_wrapper")
+    frame_stack = _mapping(wrappers.get("frame_stack_wrapper"))
+    frame_stack_size = _as_float(frame_stack.get("stack_size"))
     _add(
         checks,
-        "policy.frame_stack_disabled",
-        frame_stack is None,
-        expected=None,
-        actual=frame_stack,
-        detail="A recurrent baseline should not silently retain the default 10-frame stack.",
+        "policy.spatiotemporal_stack_enabled",
+        frame_stack_size is not None and frame_stack_size >= 3,
+        expected={"stack_size": ">= 3"},
+        actual=frame_stack or None,
+        detail=(
+            "The R(2+1)D retina requires an explicit temporal stack. The LSTM adds "
+            "persistent state rather than replacing local retinal motion input."
+        ),
     )
     constant_wrapper = wrappers.get("constant_action_wrapper")
     constant_actions = _mapping(_mapping(constant_wrapper).get("constant_actions"))
@@ -891,12 +895,13 @@ def _check_sb3_checkpoint(run_dir: Path, checks: list[Check]) -> None:
         )
         return
 
+    first_conv_suffixes = ("cnn.0.weight", "spatial_stem.0.weight")
     conv_candidates = [
         (name, value)
         for name, value in state_dict.items()
         if "features_extractor" in name
-        and name.endswith("cnn.0.weight")
-        and getattr(value, "ndim", None) == 4
+        and name.endswith(first_conv_suffixes)
+        and getattr(value, "ndim", None) in (4, 5)
     ]
     unique_in_channels = sorted({int(value.shape[1]) for _, value in conv_candidates})
     expected_channel_counts = sorted(
@@ -924,7 +929,7 @@ def _check_sb3_checkpoint(run_dir: Path, checks: list[Check]) -> None:
             ],
         },
         detail=(
-            "A (20,20,3) retinal tensor must enter Conv2d with 3 channels.  Twenty "
+            "A retinal tensor must enter Conv2d/Conv3d with 3 channels. Twenty "
             "input channels means height was silently interpreted as channels."
         ),
     )

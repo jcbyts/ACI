@@ -3,37 +3,23 @@ set -euo pipefail
 
 mkdir -p launch_logs
 
-GPUS=(0 1 2 3)
-
+GPUS=(2 3 2 3)
 MODES=(
-  fixed-2eye-mlp
-  fixed-2eye-mlp
-  actuated-2eye-mlp
-  actuated-2eye-mlp
+  fixed-2eye-rppo
+  fixed-2eye-rppo
+  actuated-2eye-rppo
+  actuated-2eye-rppo
 )
-
-AGENT_CONFIGS=(
-  point_yaw_rate
-  point_yaw_rate
-  point_yaw_rate_eye
-  point_yaw_rate_eye
-)
-
 SEEDS=(0 100 0 100)
 
 N_ENVS=8
-TOTAL_TIMESTEPS=1000000
-
+TOTAL_TIMESTEPS=750000
 EVAL_EVERY_TIMESTEPS=25000
 EVAL_FREQ=$((EVAL_EVERY_TIMESTEPS / N_ENVS))
-
 STAMP=$(date +%Y%m%d_%H%M%S)
-
 OVERLAY_ARG='overlay=[tracking_documented_reward,textured_ground]'
-POLICY_OVERRIDE='trainer/model/policy_kwargs=spatiotemporal_r2plus1d_shared'
 
 PIDS=()
-
 cleanup() {
     echo "Stopping launched jobs..."
     for pid in "${PIDS[@]:-}"; do
@@ -45,28 +31,16 @@ trap cleanup INT TERM
 for i in "${!GPUS[@]}"; do
     GPU="${GPUS[$i]}"
     MODE="${MODES[$i]}"
-    AGENT_CONFIG="${AGENT_CONFIGS[$i]}"
     SEED="${SEEDS[$i]}"
-
-    AGENT_OVERRIDE="env/agents@env.agents.agent=${AGENT_CONFIG}"
-    RUN_NAME="${MODE}_r2plus1d_yawrate_seed${SEED}_nenv${N_ENVS}_${STAMP}"
+    RUN_NAME="${MODE}_cyclopean_lstm_seed${SEED}_nenv${N_ENVS}_${STAMP}"
     LOG_FILE="launch_logs/${RUN_NAME}.log"
 
-    echo "Launching:"
-    echo "  GPU:        ${GPU}"
-    echo "  mode:       ${MODE}"
-    echo "  agent:      ${AGENT_CONFIG}"
-    echo "  seed:       ${SEED}"
-    echo "  timesteps:  ${TOTAL_TIMESTEPS}"
-    echo "  run:        ${RUN_NAME}"
-    echo "  log:        ${LOG_FILE}"
+    echo "Launching ${MODE}, seed ${SEED}, on GPU ${GPU}"
 
     CUDA_VISIBLE_DEVICES="${GPU}" \
     MUJOCO_EGL_DEVICE_ID="${GPU}" \
     bash scripts/run_tracking_baseline.sh "${MODE}" \
         "${OVERLAY_ARG}" \
-        "${AGENT_OVERRIDE}" \
-        "${POLICY_OVERRIDE}" \
         seed="${SEED}" \
         expname="${RUN_NAME}" \
         trainer.n_envs="${N_ENVS}" \
@@ -80,8 +54,6 @@ for i in "${!GPUS[@]}"; do
     PIDS+=("$!")
     sleep 5
 done
-
-echo "Started jobs: ${PIDS[*]}"
 
 FAILED=0
 for pid in "${PIDS[@]}"; do

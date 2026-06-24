@@ -13,6 +13,7 @@ import torch
 from sb3_contrib import RecurrentPPO
 from stable_baselines3 import PPO
 
+from cambrian.ml.policies import MjCambrianCyclopeanLstmPolicy
 from cambrian.utils.logger import get_logger
 
 
@@ -147,4 +148,7 @@ class MjCambrianModel(_MjCambrianModelMixin, PPO):
 
 
 class MjCambrianRecurrentModel(_MjCambrianModelMixin, RecurrentPPO):
-    pass
+    policy_aliases = {
+        **RecurrentPPO.policy_aliases,
+        "CyclopeanMultiInputLstmPolicy": MjCambrianCyclopeanLstmPolicy,
+    }

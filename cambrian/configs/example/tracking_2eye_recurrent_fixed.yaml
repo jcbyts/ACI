@@ -1,17 +1,16 @@
 # @package _global_
 
-# Policy/encoder control: same fixed binocular task as tracking_2eye_mlp_fixed, but
-# replace frame stacking + MLP PPO with a spatial CNN and recurrent PPO.
+# Recurrent infrastructure test built directly on the successful fixed-eye yaw-rate
+# condition. The ten-frame stack stays enabled and is consumed by the R(2+1)D retina.
 defaults:
   - tracking_2eye_mlp_fixed
+  - override /env/agents@env.agents.agent: point_yaw_rate
+  - override /env/agents/eyes@env.agents.agent.eyes.eye: binocular_matched_fixed
   - override /trainer/model: recurrent_ppo
 
-expname: tracking_2eye_recurrent_fixed_seed${seed}
+expname: tracking_2eye_cyclopean_recurrent_fixed_seed${seed}
 
 trainer:
-  wrappers:
-    frame_stack_wrapper: null
-    constant_action_wrapper: null
   callbacks:
     eval_callback:
       callback_after_eval:

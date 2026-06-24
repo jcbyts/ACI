@@ -1,12 +1,13 @@
 defaults:
-  - policy_kwargs: spatial_cnn_light_shared_lstm
+  - policy_kwargs: cyclopean_r2plus1d_lstm
 
 _target_: cambrian.ml.model.MjCambrianRecurrentModel
 _partial_: true
 _convert_: all
 
-policy: MultiInputLstmPolicy
+policy: CyclopeanMultiInputLstmPolicy
 
+# 256 steps x 8 environments = 2048 transitions per rollout in the standard sweep.
 n_steps: 256
 batch_size: 256
 n_epochs: 4
