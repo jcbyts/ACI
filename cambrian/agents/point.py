@@ -277,59 +277,35 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
         return spaces.Box(low=-1, high=1, shape=(n,), dtype=np.float32)
 
 
-class MjCambrianAgentPointRelative(MjCambrianAgentPoint):
-    """Point agent whose heading action is interpreted relative to current heading."""
 
-    def __init__(
-        self,
-        config: MjCambrianAgentConfig,
-        name: str,
-        *,
-        kp: float = 0.75,
-        max_relative_heading: float = 0.5,
-    ):
-        super().__init__(config, name, kp=kp)
-        self._max_relative_heading = max_relative_heading
+class MjCambrianAgentPointYawRate(MjCambrianAgentPoint):
+    """Point agent controlled by forward speed and body-relative yaw rate.
+
+    Policy action 0 is the existing forward-speed command. Policy action 1 is a
+    normalized desired yaw rate: -1 is maximum right turn, 0 holds heading, and +1 is
+    maximum left turn. The physical rate limit is defined by the yaw actuator's
+    ``ctrlrange`` in ``point_yaw_rate.xml``.
+    """
 
     def _body_ctrl_from_action(self, action: ActionType) -> ActionType:
-        v = np.interp(action[0], [-1, 1], self._v_ctrlrange)
-        current_heading = self.qpos[2]
-        vx = v * np.cos(current_heading)
-        vy = v * np.sin(current_heading)
-
-        heading_delta = float(action[1]) * self._max_relative_heading
-        target_heading = current_heading + heading_delta
-        target_heading = (target_heading + np.pi) % (2 * np.pi) - np.pi
-        heading_action = np.interp(target_heading, self._theta_ctrlrange, [-1, 1])
-        return [vx, vy, heading_action]
+        forward_speed = float(np.interp(action[0], [-1.0, 1.0], self._v_ctrlrange))
+        current_heading = float(self.qpos[2])
+        vx = forward_speed * np.cos(current_heading)
+        vy = forward_speed * np.sin(current_heading)
+        yaw_rate = float(np.clip(action[1], -1.0, 1.0))
+        return np.asarray([vx, vy, yaw_rate], dtype=np.float32)
 
 
-class MjCambrianAgentPointRelativeEye(MjCambrianAgentPointEye):
-    """Actuated-eye point agent with relative body heading control."""
-
-    def __init__(
-        self,
-        config: MjCambrianAgentConfig,
-        name: str,
-        *,
-        kp: float = 0.75,
-        max_relative_heading: float = 0.5,
-    ):
-        super().__init__(config, name, kp=kp)
-        self._max_relative_heading = max_relative_heading
+class MjCambrianAgentPointYawRateEye(MjCambrianAgentPointEye):
+    """Actuated-eye point agent with forward-speed and yaw-rate body control."""
 
     def _body_ctrl_from_action(self, action: ActionType) -> ActionType:
-        v = np.interp(action[0], [-1, 1], self._v_ctrlrange)
-        current_heading = self.qpos[2]
-        vx = v * np.cos(current_heading)
-        vy = v * np.sin(current_heading)
-
-        heading_delta = float(action[1]) * self._max_relative_heading
-        target_heading = current_heading + heading_delta
-        target_heading = (target_heading + np.pi) % (2 * np.pi) - np.pi
-        heading_action = np.interp(target_heading, self._theta_ctrlrange, [-1, 1])
-        return [vx, vy, heading_action]
-
+        forward_speed = float(np.interp(action[0], [-1.0, 1.0], self._v_ctrlrange))
+        current_heading = float(self.qpos[2])
+        vx = forward_speed * np.cos(current_heading)
+        vy = forward_speed * np.sin(current_heading)
+        yaw_rate = float(np.clip(action[1], -1.0, 1.0))
+        return np.asarray([vx, vy, yaw_rate], dtype=np.float32)
 
 class MjCambrianAgentPointSeeker(MjCambrianAgentPoint):
     """This is an agent which is non-trainable and defines a custom policy which

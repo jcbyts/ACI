@@ -1,7 +1,0 @@
-defaults:
-  - point
-
-instance:
-  _target_: cambrian.agents.MjCambrianAgentPointRelative
-  _partial_: true
-  max_relative_heading: 0.25

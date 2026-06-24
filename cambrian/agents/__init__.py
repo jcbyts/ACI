@@ -9,8 +9,8 @@ from cambrian.agents.object import MjCambrianAgentObject
 from cambrian.agents.point import (
     MjCambrianAgentPoint,
     MjCambrianAgentPointEye,
-    MjCambrianAgentPointRelative,
-    MjCambrianAgentPointRelativeEye,
+    MjCambrianAgentPointYawRate,
+    MjCambrianAgentPointYawRateEye,
 )
 
 __all__ = [
@@ -19,7 +19,7 @@ __all__ = [
     "MjCambrianAgent2D",
     "MjCambrianAgentPoint",
     "MjCambrianAgentPointEye",
-    "MjCambrianAgentPointRelative",
-    "MjCambrianAgentPointRelativeEye",
+    "MjCambrianAgentPointYawRate",
+    "MjCambrianAgentPointYawRateEye",
     "MjCambrianAgentObject",
 ]

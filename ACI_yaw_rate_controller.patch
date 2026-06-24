@@ -1,0 +1,188 @@
+diff --git a/cambrian/agents/__init__.py b/cambrian/agents/__init__.py
+index 8beb11d..46da804 100644
+--- a/cambrian/agents/__init__.py
++++ b/cambrian/agents/__init__.py
+@@ -9,8 +9,8 @@ from cambrian.agents.object import MjCambrianAgentObject
+ from cambrian.agents.point import (
+     MjCambrianAgentPoint,
+     MjCambrianAgentPointEye,
+-    MjCambrianAgentPointRelative,
+-    MjCambrianAgentPointRelativeEye,
++    MjCambrianAgentPointYawRate,
++    MjCambrianAgentPointYawRateEye,
+ )
+ 
+ __all__ = [
+@@ -19,7 +19,7 @@ __all__ = [
+     "MjCambrianAgent2D",
+     "MjCambrianAgentPoint",
+     "MjCambrianAgentPointEye",
+-    "MjCambrianAgentPointRelative",
+-    "MjCambrianAgentPointRelativeEye",
++    "MjCambrianAgentPointYawRate",
++    "MjCambrianAgentPointYawRateEye",
+     "MjCambrianAgentObject",
+ ]
+diff --git a/cambrian/agents/point.py b/cambrian/agents/point.py
+index 9e0ec00..f083651 100644
+--- a/cambrian/agents/point.py
++++ b/cambrian/agents/point.py
+@@ -263,59 +263,35 @@ class MjCambrianAgentPointEye(MjCambrianAgentPoint):
+         return spaces.Box(low=-1, high=1, shape=(n,), dtype=np.float32)
+ 
+ 
+-class MjCambrianAgentPointRelative(MjCambrianAgentPoint):
+-    """Point agent whose heading action is interpreted relative to current heading."""
+ 
+-    def __init__(
+-        self,
+-        config: MjCambrianAgentConfig,
+-        name: str,
+-        *,
+-        kp: float = 0.75,
+-        max_relative_heading: float = 0.5,
+-    ):
+-        super().__init__(config, name, kp=kp)
+-        self._max_relative_heading = max_relative_heading
++class MjCambrianAgentPointYawRate(MjCambrianAgentPoint):
++    """Point agent controlled by forward speed and body-relative yaw rate.
+ 
+-    def _body_ctrl_from_action(self, action: ActionType) -> ActionType:
+-        v = np.interp(action[0], [-1, 1], self._v_ctrlrange)
+-        current_heading = self.qpos[2]
+-        vx = v * np.cos(current_heading)
+-        vy = v * np.sin(current_heading)
+-
+-        heading_delta = float(action[1]) * self._max_relative_heading
+-        target_heading = current_heading + heading_delta
+-        target_heading = (target_heading + np.pi) % (2 * np.pi) - np.pi
+-        heading_action = np.interp(target_heading, self._theta_ctrlrange, [-1, 1])
+-        return [vx, vy, heading_action]
++    Policy action 0 is the existing forward-speed command. Policy action 1 is a
++    normalized desired yaw rate: -1 is maximum right turn, 0 holds heading, and +1 is
++    maximum left turn. The physical rate limit is defined by the yaw actuator's
++    ``ctrlrange`` in ``point_yaw_rate.xml``.
++    """
+ 
++    def _body_ctrl_from_action(self, action: ActionType) -> ActionType:
++        forward_speed = float(np.interp(action[0], [-1.0, 1.0], self._v_ctrlrange))
++        current_heading = float(self.qpos[2])
++        vx = forward_speed * np.cos(current_heading)
++        vy = forward_speed * np.sin(current_heading)
++        yaw_rate = float(np.clip(action[1], -1.0, 1.0))
++        return np.asarray([vx, vy, yaw_rate], dtype=np.float32)
+ 
+-class MjCambrianAgentPointRelativeEye(MjCambrianAgentPointEye):
+-    """Actuated-eye point agent with relative body heading control."""
+ 
+-    def __init__(
+-        self,
+-        config: MjCambrianAgentConfig,
+-        name: str,
+-        *,
+-        kp: float = 0.75,
+-        max_relative_heading: float = 0.5,
+-    ):
+-        super().__init__(config, name, kp=kp)
+-        self._max_relative_heading = max_relative_heading
++class MjCambrianAgentPointYawRateEye(MjCambrianAgentPointEye):
++    """Actuated-eye point agent with forward-speed and yaw-rate body control."""
+ 
+     def _body_ctrl_from_action(self, action: ActionType) -> ActionType:
+-        v = np.interp(action[0], [-1, 1], self._v_ctrlrange)
+-        current_heading = self.qpos[2]
+-        vx = v * np.cos(current_heading)
+-        vy = v * np.sin(current_heading)
+-
+-        heading_delta = float(action[1]) * self._max_relative_heading
+-        target_heading = current_heading + heading_delta
+-        target_heading = (target_heading + np.pi) % (2 * np.pi) - np.pi
+-        heading_action = np.interp(target_heading, self._theta_ctrlrange, [-1, 1])
+-        return [vx, vy, heading_action]
+-
++        forward_speed = float(np.interp(action[0], [-1.0, 1.0], self._v_ctrlrange))
++        current_heading = float(self.qpos[2])
++        vx = forward_speed * np.cos(current_heading)
++        vy = forward_speed * np.sin(current_heading)
++        yaw_rate = float(np.clip(action[1], -1.0, 1.0))
++        return np.asarray([vx, vy, yaw_rate], dtype=np.float32)
+ 
+ class MjCambrianAgentPointSeeker(MjCambrianAgentPoint):
+     """This is an agent which is non-trainable and defines a custom policy which
+diff --git a/cambrian/configs/env/agents/point_yaw_rate.yaml b/cambrian/configs/env/agents/point_yaw_rate.yaml
+new file mode 100644
+index 0000000..610e8a4
+--- /dev/null
++++ b/cambrian/configs/env/agents/point_yaw_rate.yaml
+@@ -0,0 +1,11 @@
++defaults:
++  - point
++
++instance:
++  _target_: cambrian.agents.point.MjCambrianAgentPointYawRate
++  _partial_: true
++
++xml:
++  _target_: cambrian.utils.cambrian_xml.MjCambrianXML.parse
++  _convert_: all
++  xml_string: ${read:${path:${package:},models,agents,point_yaw_rate.xml}}
+diff --git a/cambrian/configs/env/agents/point_yaw_rate_eye.yaml b/cambrian/configs/env/agents/point_yaw_rate_eye.yaml
+new file mode 100644
+index 0000000..f239c45
+--- /dev/null
++++ b/cambrian/configs/env/agents/point_yaw_rate_eye.yaml
+@@ -0,0 +1,11 @@
++defaults:
++  - point_eye
++
++instance:
++  _target_: cambrian.agents.point.MjCambrianAgentPointYawRateEye
++  _partial_: true
++
++xml:
++  _target_: cambrian.utils.cambrian_xml.MjCambrianXML.parse
++  _convert_: all
++  xml_string: ${read:${path:${package:},models,agents,point_yaw_rate.xml}}
+diff --git a/cambrian/models/agents/point_yaw_rate.xml b/cambrian/models/agents/point_yaw_rate.xml
+new file mode 100644
+index 0000000..e4894e6
+--- /dev/null
++++ b/cambrian/models/agents/point_yaw_rate.xml
+@@ -0,0 +1,37 @@
++<mujoco>
++  <include file="cambrian/models/agents/agent.xml" />
++  <asset>
++    <material name="${parent:xml}_mat" emission="1" rgba="0.3 0.6 0.3 1" />
++    <material name="${parent:xml}_direction_mat" emission="1" rgba="0.6 0.3 0.3 1" />
++  </asset>
++  <worldbody>
++    <body name="${parent:xml}_body" pos="0 0 0.2">
++      <!-- Make the alpha very small so it's almost invisible but still visible to mj_ray -->
++      <geom name="${parent:xml}_geom" type="sphere" size="0.2" rgba="0.0 0.0 1.0 0.01"
++        contype="1" friction=".5 .1 .1" density="1000" margin="0.002" condim="1" conaffinity="1" group="2" />
++      <site name="${parent:xml}_site" pos="0.0 0.0 0.0" material="${parent:xml}_mat"
++        size="0.2" />
++      <site name="${parent:xml}_direction_site" group="2" pos="0.3 0.0 0.0"
++        quat="0.5 0.5 0.5 0.5" type="cylinder" material="${parent:xml}_direction_mat"
++        rgba="1.0 0.0 0.0 1.0" size="0.05 0.15" />
++
++      <inertial pos="0 0 0" mass="1" diaginertia="0.1 0.1 0.1" />
++
++      <joint name="${parent:xml}_joint_x" type="slide" pos="0 0 0" axis="1 0 0" damping="1"
++        limited="false" />
++      <joint name="${parent:xml}_joint_y" type="slide" pos="0 0 0" axis="0 1 0" damping="1"
++        limited="false" />
++      <joint name="${parent:xml}_joint_yaw" type="hinge" pos="0 0 0" axis="0 0 1" damping="1"
++        limited="false" />
++    </body>
++  </worldbody>
++  <actuator>
++    <!-- These are just dummy actuators for providing ranges -->
++    <velocity name="${parent:xml}_act_x" joint="${parent:xml}_joint_x" ctrlrange="-10.0 10.0"
++      ctrllimited="true" kv="100" />
++    <velocity name="${parent:xml}_act_y" joint="${parent:xml}_joint_y" ctrlrange="-10.0 10.0"
++      ctrllimited="true" kv="100" />
++    <velocity name="${parent:xml}_act_yaw" joint="${parent:xml}_joint_yaw"
++      ctrlrange="-1.25 1.25" ctrllimited="true" kv="10" />
++  </actuator>
++</mujoco>
