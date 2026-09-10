@@ -1,6 +1,23 @@
 # Contributing
 
-Contributing to the repository is fairly easy, so please see below for instructions on how to actually make contributions to this project.
+`main` is the maintained branch of this research fork. Follow the
+[student quickstart](student_quickstart.md) first, then create one branch per change:
+
+```bash
+git switch main
+git pull --ff-only origin main
+git switch -c codex/describe-your-change
+# Make and check the change, then commit the intended files.
+git push -u origin codex/describe-your-change
+```
+
+Open a pull request against `jcbyts/ACI:main`. Include the problem, the change,
+validation, and any effect on experiment identity. Keep task, sensor, controller,
+and reward changes explicit. Record source revisions and seeds with results;
+checkpoints and raw training outputs belong in the experiment artifact store.
+
+Earlier feature branches are historical references. The old `main` is preserved
+at `legacy-main-v0.0.0`.
 
 ## Setup
 
@@ -15,7 +32,7 @@ A `conda` or `virtualenv` will add isolation to your python environments and red
 Clone the repo as normal:
 
 ```bash
-git clone https://github.com/cambrian-org/ACI.git && cd ACI
+git clone https://github.com/jcbyts/ACI.git && cd ACI
 ```
 
 ### Installing a Symbolic Linked Version for Testing
@@ -24,23 +41,14 @@ A symbolic link or symlink is a file that references another. The advantages of 
 
 ```bash
 # You need the dev requirements to build the documentation
-pip install -e '.[doc,dev]'
+pip install -e '.[docs,dev]'
 ```
 
-### Deploy your Changes
+### Documentation publishing
 
-[GitHub actions](https://github.com/features/actions) are used to automatically build the site and [GitHub pages](https://pages.github.com/) are used to host the static site. To update deployed content, you have to push to the `main` branch. Once the changes are pushed, the site will rebuild. Please ensure there are no errors in your code/documentation before doing so, as you may get an email from github if something bad happens.
-
-Further, to update the package available on [PyPI](https://pypi.org/project/cambrian-core/), you must create a [git tag](https://git-scm.com/book/en/v2/Git-Basics-Tagging). When a tag is created and pushed to GitHub, it will start an Action which will automatically push the new release to PyPI. See [Versioning](#versioning) for information on how versioning works with `cambrian`. The Github Action only runs when the tag is pushed to main through a merge request. To create a tag, you may do the following: -->
-
-```bash
-git tag <tag> # An example tag is 3.0.1
-git push origin main --tags
-```
-
-#### Versioning
-
-Versioning is done automatically through `tags` by [setuptools_scm](https://github.com/pypa/setuptools_scm). When a tag is pushed to the `main` branch, a new package is pushed to PyPI with the attached tag. Therefore, you must ensure the tag you push is _after_ the previous tags seen on GitHub (otherwise nothing will push to PyPI).
+The existing Pages workflow builds documentation when changes reach `main`.
+Use a pull request for documentation changes as well as source changes. This fork
+has no configured PyPI release workflow; do not treat archival tags as releases.
 
 ## Guidelines
 

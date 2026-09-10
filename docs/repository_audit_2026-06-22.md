@@ -1,5 +1,7 @@
 # Repository audit — 2026-06-22
 
+> Historical audit. Several findings have since been repaired, including the Git corruption reported here. Follow the [student quickstart](student_quickstart.md) and [September review](review_2026-09-10/README.md) for current status.
+
 ## Verdict
 
 Neither showcased agent run implements the requested moving-target plus

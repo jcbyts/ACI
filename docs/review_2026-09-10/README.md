@@ -1,5 +1,7 @@
 # ACI research review and student handoff — 2026-09-10
 
+> The reviewed working code has been promoted to `main`. Students should start with the [quickstart](../student_quickstart.md). The branch table below is a historical snapshot; the previous `main` is preserved at `legacy-main-v0.0.0`.
+
 ## Follow-up: code prepared for commit
 
 After the initial review, the user requested committing and pushing the necessary code. The snapshot below describes the pre-commit state at `0136459`; its references to uncommitted files and the analyzer crash are historical findings.

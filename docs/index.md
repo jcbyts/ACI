@@ -6,6 +6,8 @@
 :maxdepth: 2
 
 Home <self>
+student_quickstart
+review_2026-09-10/README
 examples/index
 usage/index
 reference/index
@@ -18,5 +20,5 @@ contributing
 ```{toctree}
 :caption: External Links
 :hidden:
-Github <https://github.com/cambrian-org/ACI>
+Github <https://github.com/jcbyts/ACI>
 ```

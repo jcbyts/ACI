@@ -1,5 +1,7 @@
 # Binocular tracking experiment contract
 
+> This document records the June 22 no-shaping baseline contract. Current recurrent configs use a ten-frame stack, and the recommended practical baseline adds training-only progress shaping. Follow the [student quickstart](student_quickstart.md) for the maintained workflow; the strict audit still flags that shaping.
+
 This document defines the experiment that counts as the baseline for studying the
 emergence of fixation and saccadic eye movements. A run name, launcher comment, or
 video is not evidence that this contract was used. The resolved configuration,

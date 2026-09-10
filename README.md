@@ -1,6 +1,72 @@
-# Artificial Cambrian Intelligence (ACI)
+# Saccade-and-fixate agents — ACI research fork
 
-Computational methods unveil intricate processes of visual system evolution by simulating environments where embodied agents simultaneously develop eye morphologies and neural processing. By exploring how task demands and environmental pressures shape vision, researchers demonstrate that different challenges trigger unique eye developments—navigation prompting compound eyes, object discrimination yielding camera-like structures—while revealing natural optical innovation emergence and systematic connections between visual acuity and neural complexity, ultimately providing a robust framework for understanding biological vision evolution and designing task-specific artificial visual systems.
+This project studies the minimum requirements for agents to learn **saccades and
+fixations**: rapid gaze shifts interspersed with periods of stable visual sampling.
+It builds on [Artificial Cambrian Intelligence](https://github.com/cambrian-org/ACI),
+using embodied agents with independently movable binocular eyes in MuJoCo.
+
+**Work from `main`.** It is the maintained starting point for this research fork.
+Start with the [student quickstart](docs/student_quickstart.md), then create a
+short-lived branch for each change and open a pull request back to `main`.
+
+## Start here
+
+```bash
+git clone https://github.com/jcbyts/ACI.git
+cd ACI
+git switch main
+```
+
+Use Python 3.12 in an isolated environment. On the existing workstation, activate
+`aci312`; for a new installation, follow the setup in the
+[quickstart](docs/student_quickstart.md#environment).
+
+The first milestone is to run a small training smoke test, load its checkpoint,
+and produce an evaluation video and behavior report. The quickstart supplies the
+commands, expected files, and the full baseline training recipe.
+
+## Current research status
+
+| Status | What to use / what it establishes |
+|---|---|
+| **Recommended starting baseline** | `actuated-2eye-rppo` with `overlay=[tracking_documented_reward,textured_ground]`: matched binocular cameras, yaw-rate body control, shared spatiotemporal retina, motor-conditioned binocular fusion, and LSTM PPO. Use `fixed-2eye-rppo` with the same settings as the control. |
+| **Working infrastructure** | Training/checkpoint/evaluation paths, corrected camera geometry and image layout, recurrent gradients/reset tests, and behavior CSV/JSON/plot generation. |
+| **Still to validate scientifically** | Robust held-out performance, fixation/saccade segmentation, and which components are necessary. Two recorded actuated recurrent seeds improve but lose performance after their best checkpoints. |
+| **Experimental** | Motor-command costs, heavy-body physics, sensor noise/integration, and alternative retinal codes. The historical metabolism sweep failed before producing checkpoints. |
+| **Historical** | Earlier PPO and R2-Dreamer approaches are documented in the [experiment review](docs/review_2026-09-10/README.md). Some used simplified tasks or incorrect geometry; compare resolved configurations before comparing scores. |
+
+The recommended baseline retains a moving target and a moving adversary. Training
+adds a small progress reward; evaluation disables that shaping. Both a ten-frame
+visual history and persistent LSTM state are enabled. These choices differ from
+the older [June 22 no-shaping contract](docs/experiment_contract.md).
+
+## Where to look
+
+- [Student quickstart](docs/student_quickstart.md): setup, smoke test, training, evaluation, analysis, and first research tasks.
+- [Experiment review and handoff](docs/review_2026-09-10/README.md): branch map, evidence, results, limitations, and controlled-ablation plan.
+- [Contributing](docs/contributing.md): branch and pull-request workflow.
+- `cambrian/configs/example/tracking_2eye_recurrent_actuated.yaml`: current actuated experiment.
+- `cambrian/ml/features_extractors.py` and `cambrian/ml/policies.py`: visual architecture and recurrent policy.
+- `cambrian/analysis/tracking_behavior.py`: current behavior measurements.
+
+## Branches and artifacts
+
+`main` is the student entry point. Older feature branches are historical snapshots;
+there is no separate permanent development branch named `saccade-and-fixate`.
+The previous `main` is preserved at annotated tag **`legacy-main-v0.0.0`**
+(commit `69525c7`). This is an archival tag, not a validated research release.
+
+Training outputs under `logs/` are local artifacts and are not included in a fresh
+clone. Train a smoke checkpoint using the quickstart, or obtain a complete recorded
+run from the project maintainer. Keep its saved configurations and source revision
+with the checkpoint. Use a fresh output directory for each evaluation.
+
+## Upstream ACI
+
+ACI supplies the simulator, eye models, configuration framework, and original
+navigation/detection/tracking tasks. Its [documentation](https://eyes.mit.edu/ACI/)
+provides background on those components. The student workflow for this fork is
+maintained here. The upstream papers and citation are retained below.
 
 ## Project Papers
 
@@ -13,7 +79,7 @@ Computational methods unveil intricate processes of visual system evolution by s
 <br>
 \[[Paper](https://arxiv.org/pdf/2501.15001) | [Website](https://eyes.mit.edu) | [Code](https://github.com/cambrian-org/ACI) | [Documentation](https://eyes.mit.edu/ACI/)\]
 
-<!-- > Vision systems in nature show remarkable diversity, from simple light-sensitive patches to complex camera eyes with lenses. While natural selection has produced these eyes through countless mutations over millions of years, they represent just one set of realized evolutionary paths. Testing hypotheses about how environmental pressures shaped eye evolution remains challenging since we cannot experimentally isolate individual factors. Computational evolution offers a way to systematically explore alternative trajectories. Here we show how environmental demands drive three fundamental aspects of visual evolution through an artificial evolution framework that co-evolves both physical eye structure and neural processing in embodied agents. First, we demonstrate that task demands bifurcate eye evolution -- navigation tasks lead to distributed compound-type eyes while object discrimination drives the emergence of high-acuity camera eyes. Second, we reveal how optical innovations like lenses naturally emerge to resolve fundamental tradeoffs between light collection and spatial precision. Third, we uncover systematic scaling laws between visual acuity and neural processing, showing how task complexity drives coordinated evolution of sensory and computational capabilities. Our work introduces a novel paradigm that illuminates evolutionary principles shaping vision by creating targeted single-player games where embodied agents must simultaneously evolve visual systems and learn complex behaviors. Through our unified genetic encoding framework, these embodied agents serve as next-generation hypothesis testing machines while providing a foundation for designing manufacturable bio-inspired vision systems. -->
+
 
 
 </div>
@@ -27,104 +93,9 @@ Computational methods unveil intricate processes of visual system evolution by s
 <br>
 \[[Paper](https://mit-genai.pubpub.org/pub/bcfcb6lu/release/3) | [Code](https://github.com/cambrian-org/ACI) | [Documentation](https://eyes.mit.edu/ACI/)\]
 
-<!-- > The incredible diversity of visual systems in the animal kingdom is a result of millions of years of coevolution between eyes and brains, adapting to process visual information efficiently in different environments. We introduce the generative design of visual intelligence (GenVI), which leverages computational methods and generative artificial intelligence to explore a vast design space of potential visual systems and cognitive capabilities. By co-generating artificial eyes and brains that can sense, perceive, and enable interaction with the environment, GenVI enables the study of the evolutionary progression of vision in nature and the development of novel and efficient artificial visual systems. We anticipate that GenVI will provide a powerful tool for vision scientists to test hypotheses and gain new insights into the evolution of visual intelligence while also enabling engineers to create unconventional, task-specific artificial vision systems that rival their biological counterparts in terms of performance and efficiency. -->
+
 
 </div>
-
-## Audited binocular tracking workflow
-
-This cleanup adds an explicit four-stage path from the original three-eye MLP tracking
-baseline to independently actuated binocular recurrent PPO. The task remains the
-original moving-goal plus moving-adversary `tracking` task; sensor noise, temporal
-integration, reward shaping, and goal-only mazes are excluded from the baseline.
-
-```bash
-bash scripts/run_tracking_baseline.sh original-3eye-mlp seed=0
-bash scripts/run_tracking_baseline.sh fixed-2eye-mlp seed=0
-bash scripts/run_tracking_baseline.sh fixed-2eye-rppo seed=0
-bash scripts/run_tracking_baseline.sh actuated-2eye-rppo seed=0
-```
-
-See [`docs/experiment_contract.md`](docs/experiment_contract.md) for the exact task,
-observation, action, geometry, evaluation, and artifact requirements. See
-[`docs/repository_audit_2026-06-22.md`](docs/repository_audit_2026-06-22.md) for the
-evidence behind the cleanup.
-
-## Setup
-
-### Prerequisites
-
-- Python 3.11 or higher
-- Java (for [Hydra](https://hydra.cc/docs/intro/); required until [\#3029](https://github.com/facebookresearch/hydra/pull/3029) is merged)
-
-### Installation
-
-First, clone the repo:
-
-```bash
-git clone https://github.com/cambrian-org/ACI.git
-```
-
-Then you can install the [`cambrian`](https://eyes.mit.edu/ACI/reference/api/cambrian/#module-cambrian) package by doing the following.
-
-```bash
-pip install -e .
-```
-
-## Usage
-
-### Test
-
-To test the setup and verify you can visualize the environment, you can run the following:
-
-```bash
-# Setting frame_skip slows down the agent's movements to make it easier to see, the default is 10.
-python cambrian/main.py --eval example=detection env.renderer.render_modes='[human]' env.frame_skip=5 env/agents@env.agents.agent=point_seeker
-```
-
-This command should open a window showing an agent moving towards a target. It uses a privileged policy which just tries to minimize the distance to the target.
-
-Currently, the available examples are:
-
-- [Navigation Task](https://eyes.mit.edu/ACI/examples/navigation): A single agent navigating a large maze.
-- [Detection Task](https://eyes.mit.edu/ACI/examples/detection): A single agent moving towards a target while avoiding an obstacle.
-- [Tracking Task](https://eyes.mit.edu/ACI/examples/tracking): Similar to `detection`, but the target and obstacle move.
-- [Optics](https://eyes.mit.edu/ACI/examples/optics): Outlines how to use our custom imaging model
-
-### Train
-
-To train a single agent in a detection-style task, you can run the following command. You will find the trained model and output files at `log/<today's date>/exp_detection`. This should take 10 to 20 minutes depending on your machine.
-
-```bash
-bash scripts/run.sh cambrian/main.py --train example=detection
-```
-
-After training, you can evaluate the agent using the following command. Output files will be saved in `log/<today's date>/exp_detection`.
-
-```bash
-python cambrian/main.py --eval example=detection trainer/model=loaded_model
-```
-
-## Documentation
-
-For more detailed information on how to train, evaluate, and run experiments, see the [Documentation](https://eyes.mit.edu/ACI) website.
-
-### Compiling the Documentation
-
-First install the dev/doc dependencies.
-
-```bash
-pip install -e '.[doc,dev]'
-```
-
-Then to build the docs, run the following:
-
-```bash
-cd docs
-make clean html
-```
-
-To view the build, go to your browser, and open the `index.html` file located inside `build/html/` (or run `open build/html/index.html`).
 
 ## Citation
 
