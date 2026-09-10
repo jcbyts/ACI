@@ -64,7 +64,28 @@ class MjCambrianSingleAgentEnvWrapper(gym.Wrapper):
         obs, reward, terminated, truncated, info = self.env.step(action)
 
         obs = obs[self._agent.name]
-        info = info[self._agent.name]
+
+        # Preserve multi-agent diagnostics for posthoc behavior analysis without
+        # creating a recursive/cyclic info object. SubprocVecEnv pickles info
+        # dictionaries across process boundaries; if the trainable agent info points
+        # back to the full info dict that contains itself, worker processes can hit a
+        # RecursionError and the parent process reports only BrokenPipeError.
+        all_agent_info = {}
+        for agent_name, agent_info in info.items():
+            if isinstance(agent_info, dict):
+                # Shallow-copy each per-agent info dict and explicitly drop any
+                # previous nested multi-agent payload. This prevents cycles even if
+                # a wrapper has already inserted "_all_agents".
+                all_agent_info[agent_name] = {
+                    key: value
+                    for key, value in agent_info.items()
+                    if key != "_all_agents"
+                }
+            else:
+                all_agent_info[agent_name] = agent_info
+
+        info = dict(all_agent_info[self._agent.name])
+        info["_all_agents"] = all_agent_info
 
         if self._combine_rewards:
             reward = sum(list(reward.values()))

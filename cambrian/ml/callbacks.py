@@ -2,6 +2,7 @@
 
 import csv
 import glob
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -124,13 +125,35 @@ class MjCambrianEvalCallback(EvalCallback):
     def _init_callback(self):
         self.log_path = Path(self.log_path)
         self.n_evals = 0
+        self.best_eval_index = -1
+        self.best_eval_timesteps = -1
+        self.best_eval_mean_reward = -float("inf")
 
         # Delete all the existing renders
         for f in glob.glob(str(self.log_path / "vis_*")):
             get_logger().info(f"Deleting {f}")
             Path(f).unlink()
 
+        # Remove stale best-preview symlinks/copies from restarted runs.
+        for f in glob.glob(str(self.log_path / "best_vis.*")):
+            get_logger().info(f"Deleting {f}")
+            Path(f).unlink()
+
         super()._init_callback()
+
+    def _write_best_metadata(self, eval_index: int, mean_reward: float) -> None:
+        metadata = {
+            "best_eval_index": int(eval_index),
+            "best_eval_timesteps": int(self.num_timesteps),
+            "best_eval_mean_reward": float(mean_reward),
+            "best_model_zip": (
+                str(Path(self.best_model_save_path) / "best_model.zip")
+                if self.best_model_save_path is not None
+                else None
+            ),
+        }
+        with open(self.log_path / "best_model_metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2, sort_keys=True)
 
     def _on_step(self) -> bool:
         # Early exit
@@ -144,21 +167,40 @@ class MjCambrianEvalCallback(EvalCallback):
         env.overlays["Best Mean Reward"] = f"{self.best_mean_reward:.2f}"
         env.overlays["Total Timesteps"] = f"{self.num_timesteps}"
 
-        # Run the evaluation
+        old_best_mean_reward = float(self.best_mean_reward)
+
+        # Run the evaluation. Stable Baselines' EvalCallback saves best_model.zip
+        # whenever the mean reward improves. We add explicit metadata and a matching
+        # best_vis.* copy below so the best checkpoint and best behavior preview are
+        # easy to recover after long sweeps.
         get_logger().info(f"Starting {self.n_eval_episodes} evaluation run(s)...")
         env.record(self.render)
         continue_training = super()._on_step()
 
+        improved = float(self.best_mean_reward) > old_best_mean_reward
+        filename = Path(f"vis_{self.n_evals}")
+
         if self.render:
             # Save the visualization
-            filename = Path(f"vis_{self.n_evals}")
             env.save(self.log_path / filename)
             env.record(False)
 
-        if self.render:
-            # Copy the most recent gif to latest.gif so that we can just watch this file
+            # Copy the most recent render to latest.* so that it can be tailed live.
             for f in self.log_path.glob(str(filename.with_suffix(".*"))):
                 shutil.copy(f, f.with_stem("latest"))
+                if improved:
+                    shutil.copy(f, f.with_stem("best_vis"))
+
+        if improved:
+            self.best_eval_index = int(self.n_evals)
+            self.best_eval_timesteps = int(self.num_timesteps)
+            self.best_eval_mean_reward = float(self.best_mean_reward)
+            self._write_best_metadata(self.n_evals, self.best_mean_reward)
+            get_logger().info(
+                "New best checkpoint: "
+                f"eval={self.n_evals}, timesteps={self.num_timesteps}, "
+                f"mean_reward={self.best_mean_reward:.3f}"
+            )
 
         self.n_evals += 1
         return continue_training

@@ -108,10 +108,21 @@ class MjCambrianTrainer:
         model.learn(total_timesteps=total_timesteps, callback=callback)
         get_logger().info("Finished training the agent...")
 
-        # Save the policy
-        get_logger().info(f"Saving model to {self._config.expdir}...")
+        # Save the final policy.  EvalCallback also saves best_model.zip whenever the
+        # deterministic evaluation mean improves; keep both checkpoints because PPO
+        # often has a transient best policy before the final update.
+        get_logger().info(f"Saving final model to {self._config.expdir}...")
         model.save_policy(self._config.expdir)
-        get_logger().debug(f"Saved model to {self._config.expdir}...")
+        get_logger().debug(f"Saved final policy to {self._config.expdir}...")
+
+        best_model = self._config.expdir / "best_model.zip"
+        if best_model.exists():
+            get_logger().info(f"Best SB3 checkpoint is available at {best_model}")
+        else:
+            get_logger().warning(
+                "No best_model.zip was written. This is expected only when the "
+                "evaluation callback was disabled or never ran."
+            )
 
         # The finished file indicates to the evo script that the agent is done
         Path(self._config.expdir / "finished").touch()
