@@ -1,0 +1,56 @@
+{
+  "preflight": "binocular_geometry",
+  "status": "ok",
+  "cameras": [
+    {
+      "name": "agent_eye_0_0",
+      "yaw_deg": -18.74995267636092,
+      "position_yaw_deg": -18.75000426740843,
+      "resolution": [
+        30,
+        20
+      ],
+      "sensorsize": [
+        0.00828427,
+        0.0133636
+      ],
+      "fov_deg": [
+        44.99999389928657,
+        67.50010790658736
+      ],
+      "coverage_deg": [
+        -52.5000066296546,
+        15.00010127693276
+      ]
+    },
+    {
+      "name": "agent_eye_0_1",
+      "yaw_deg": 18.74995267636092,
+      "position_yaw_deg": 18.75000426740843,
+      "resolution": [
+        30,
+        20
+      ],
+      "sensorsize": [
+        0.00828427,
+        0.0133636
+      ],
+      "fov_deg": [
+        44.99999389928657,
+        67.50010790658736
+      ],
+      "coverage_deg": [
+        -15.00010127693276,
+        52.5000066296546
+      ]
+    }
+  ],
+  "expected_union_coverage_deg": [
+    -52.5,
+    52.5
+  ],
+  "expected_binocular_overlap_deg": [
+    -15.0,
+    15.0
+  ]
+}

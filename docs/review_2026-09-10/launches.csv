@@ -1,0 +1,61 @@
+log,bytes,run_directory_present,recorded_errors
+launch_logs/actuated-2eye-mlp_hunger_relative_heading0.25_seed0_nenv8_20260623_112913.log,14195,False,
+launch_logs/actuated-2eye-mlp_hunger_relative_heading0.25_seed0_nenv8_20260623_120509.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/actuated-2eye-mlp_hunger_relative_heading0.25_seed0_nenv8_20260623_121112.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/actuated-2eye-mlp_hunger_relative_heading0.25_seed0_nenv8_20260623_121211.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/actuated-2eye-mlp_hunger_relative_heading0.25_seed0_nenv8_20260623_122616.log,18663,True,
+launch_logs/actuated-2eye-mlp_hunger_relative_heading0.25_seed100_nenv8_20260623_112913.log,14304,False,
+launch_logs/actuated-2eye-mlp_hunger_relative_heading0.25_seed100_nenv8_20260623_120509.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/actuated-2eye-mlp_hunger_relative_heading0.25_seed100_nenv8_20260623_121112.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/actuated-2eye-mlp_hunger_relative_heading0.25_seed100_nenv8_20260623_121211.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/actuated-2eye-mlp_hunger_relative_heading0.25_seed100_nenv8_20260623_122616.log,29319,True,
+launch_logs/actuated-2eye-mlp_r2plus1d_yawrate_seed0_nenv8_20260623_220639.log,59943,True,
+launch_logs/actuated-2eye-mlp_r2plus1d_yawrate_seed100_nenv8_20260623_220639.log,60510,True,
+launch_logs/actuated-2eye-mlp_relative_heading0.25_seed0_nenv8_20260623_104255.log,16774,True,
+launch_logs/actuated-2eye-mlp_relative_heading0.25_seed100_nenv8_20260623_104255.log,30190,True,
+launch_logs/actuated-2eye-mlp_seed0_nenv8_20260623_094616.log,25694,True,
+launch_logs/actuated-2eye-mlp_seed100_nenv8_20260623_094616.log,11712,True,
+launch_logs/actuated-2eye-mlp_seed200_nenv8_20260623_094616.log,13089,True,
+launch_logs/actuated-2eye-mlp_seed300_nenv8_20260623_094616.log,13102,True,
+launch_logs/actuated-2eye-mlp_yawrate_seed0_nenv8_20260623_150830.log,14681,True,
+launch_logs/actuated-2eye-mlp_yawrate_seed0_nenv8_20260623_160043.log,43873,True,
+launch_logs/actuated-2eye-mlp_yawrate_seed0_nenv8_20260623_181249.log,87847,True,
+launch_logs/actuated-2eye-mlp_yawrate_seed100_nenv8_20260623_150830.log,15050,True,
+launch_logs/actuated-2eye-mlp_yawrate_seed100_nenv8_20260623_160043.log,44562,True,
+launch_logs/actuated-2eye-mlp_yawrate_seed100_nenv8_20260623_181249.log,88770,True,
+launch_logs/actuated-2eye-rppo_baseline_seed0_nenv8_20260624_154724.log,1617578,True,BrokenPipeError: [Errno 32] Broken pipe | RecursionError: maximum recursion depth exceeded
+launch_logs/actuated-2eye-rppo_cyclopean_lstm_seed0_nenv8_20260624_095910.log,45725,True,
+launch_logs/actuated-2eye-rppo_cyclopean_lstm_seed100_nenv8_20260624_095910.log,45995,True,
+launch_logs/actuated-2eye-rppo_idle_metabolism_seed0_nenv8_20260624_154724.log,1617621,True,BrokenPipeError: [Errno 32] Broken pipe | RecursionError: maximum recursion depth exceeded
+launch_logs/actuated-2eye-rppo_seed0_nenv8_20260622_214643.log,27866,True,
+launch_logs/actuated-2eye-rppo_strong_body_heavy_seed0_nenv8_20260624_154724.log,1617640,True,BrokenPipeError: [Errno 32] Broken pipe | RecursionError: maximum recursion depth exceeded
+launch_logs/actuated-2eye-rppo_weak_body_heavy_seed0_nenv8_20260624_154724.log,1617632,True,BrokenPipeError: [Errno 32] Broken pipe | RecursionError: maximum recursion depth exceeded
+launch_logs/fixed-2eye-mlp_hunger_relative_heading0.25_seed0_nenv8_20260623_112913.log,9624,False,
+launch_logs/fixed-2eye-mlp_hunger_relative_heading0.25_seed0_nenv8_20260623_120509.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/fixed-2eye-mlp_hunger_relative_heading0.25_seed0_nenv8_20260623_121112.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/fixed-2eye-mlp_hunger_relative_heading0.25_seed0_nenv8_20260623_121211.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/fixed-2eye-mlp_hunger_relative_heading0.25_seed0_nenv8_20260623_122616.log,18608,True,
+launch_logs/fixed-2eye-mlp_hunger_relative_heading0.25_seed100_nenv8_20260623_112913.log,17165,False,
+launch_logs/fixed-2eye-mlp_hunger_relative_heading0.25_seed100_nenv8_20260623_120509.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/fixed-2eye-mlp_hunger_relative_heading0.25_seed100_nenv8_20260623_121112.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/fixed-2eye-mlp_hunger_relative_heading0.25_seed100_nenv8_20260623_121211.log,10050,False,ConfigCompositionException: In 'overlay/tracking_hunger_pressure': ConfigKeyError raised while composing config: | ConfigKeyError: Key 'overlay' not in 'MjCambrianConfig'
+launch_logs/fixed-2eye-mlp_hunger_relative_heading0.25_seed100_nenv8_20260623_122616.log,26169,True,
+launch_logs/fixed-2eye-mlp_r2plus1d_yawrate_seed0_nenv8_20260623_220639.log,60177,True,
+launch_logs/fixed-2eye-mlp_r2plus1d_yawrate_seed100_nenv8_20260623_220639.log,60665,True,
+launch_logs/fixed-2eye-mlp_relative_heading0.25_seed0_nenv8_20260623_104255.log,18086,True,
+launch_logs/fixed-2eye-mlp_relative_heading0.25_seed100_nenv8_20260623_104255.log,21101,True,
+launch_logs/fixed-2eye-mlp_seed0_nenv8_20260622_214643.log,15992,True,
+launch_logs/fixed-2eye-mlp_yawrate_seed0_nenv8_20260623_150830.log,15097,True,
+launch_logs/fixed-2eye-mlp_yawrate_seed0_nenv8_20260623_160043.log,44089,True,
+launch_logs/fixed-2eye-mlp_yawrate_seed0_nenv8_20260623_181249.log,87431,True,
+launch_logs/fixed-2eye-mlp_yawrate_seed0_nenv8_20260623_214936.log,21884,True,ConnectionResetError: [Errno 104] Connection reset by peer
+launch_logs/fixed-2eye-mlp_yawrate_seed100_nenv8_20260623_150830.log,15205,True,
+launch_logs/fixed-2eye-mlp_yawrate_seed100_nenv8_20260623_160043.log,44387,True,
+launch_logs/fixed-2eye-mlp_yawrate_seed100_nenv8_20260623_181249.log,88033,True,
+launch_logs/fixed-2eye-mlp_yawrate_seed100_nenv8_20260623_214936.log,11736,True,
+launch_logs/fixed-2eye-r2plus1d_yawrate_seed0_nenv8_20260623_214936.log,7412,True,
+launch_logs/fixed-2eye-r2plus1d_yawrate_seed100_nenv8_20260623_214936.log,7440,True,
+launch_logs/fixed-2eye-rppo_cyclopean_lstm_seed0_nenv8_20260624_095910.log,45138,True,
+launch_logs/fixed-2eye-rppo_cyclopean_lstm_seed100_nenv8_20260624_095910.log,45518,True,
+launch_logs/fixed-2eye-rppo_seed0_nenv8_20260622_214643.log,28384,True,
+launch_logs/original-3eye-mlp_seed0_nenv8_20260622_214643.log,27566,True,

@@ -1,0 +1,595 @@
+{
+  "contract": "tracking_2eye_recurrent_actuated_v1",
+  "run_dir": "/home/jake/repos/ACI/logs/2026-06-24/actuated-2eye-rppo_cyclopean_lstm_seed0_nenv8_20260624_095910",
+  "config_path": "/home/jake/repos/ACI/logs/2026-06-24/actuated-2eye-rppo_cyclopean_lstm_seed0_nenv8_20260624_095910/config.yaml",
+  "status": "fail",
+  "summary": {
+    "passed": 32,
+    "failed": 1,
+    "warnings": 0
+  },
+  "checks": [
+    {
+      "name": "task.primary_agent_present",
+      "status": "pass",
+      "expected": "agent",
+      "actual": [
+        "adversary0",
+        "agent",
+        "goal0"
+      ],
+      "detail": "The controllable agent must exist in the resolved environment.",
+      "required": true
+    },
+    {
+      "name": "task.goal_present",
+      "status": "pass",
+      "expected": ">=1 goal* agent",
+      "actual": [
+        "goal0"
+      ],
+      "detail": "The original tracking task contains a target.",
+      "required": true
+    },
+    {
+      "name": "task.adversary_present",
+      "status": "pass",
+      "expected": ">=1 adversary* agent",
+      "actual": [
+        "adversary0"
+      ],
+      "detail": "A goal-only run is not the requested tracking task.",
+      "required": true
+    },
+    {
+      "name": "task.goal_moves",
+      "status": "pass",
+      "expected": "all goal* agents use a PointSeeker implementation",
+      "actual": {
+        "goal0": "cambrian.agents.point.MjCambrianAgentPointSeeker"
+      },
+      "detail": "Detection uses static objects; tracking replaces them with moving seekers.",
+      "required": true
+    },
+    {
+      "name": "task.adversary_moves",
+      "status": "pass",
+      "expected": "all adversary* agents use a PointSeeker implementation",
+      "actual": {
+        "adversary0": "cambrian.agents.point.MjCambrianAgentPointSeeker"
+      },
+      "detail": "The requested adversary must move, not merely be present.",
+      "required": true
+    },
+    {
+      "name": "task.goal_termination_enabled",
+      "status": "pass",
+      "expected": {
+        "enabled": true,
+        "for_agents": [
+          "agent"
+        ],
+        "to_agents": [
+          "goal0"
+        ],
+        "distance_threshold": 1.0
+      },
+      "actual": {
+        "_target_": "cambrian.envs.done_fns.done_if_close_to_agents",
+        "_partial_": true,
+        "for_agents": [
+          "agent"
+        ],
+        "to_agents": [
+          "goal0"
+        ],
+        "distance_threshold": 1.0
+      },
+      "detail": "Training must retain the original agent-to-goal termination; a present but disabled or empty-target clause is not sufficient.",
+      "required": true
+    },
+    {
+      "name": "task.adversary_truncation_enabled",
+      "status": "pass",
+      "expected": {
+        "enabled": true,
+        "for_agents": [
+          "agent"
+        ],
+        "to_agents": [
+          "adversary0"
+        ],
+        "distance_threshold": 1.0
+      },
+      "actual": {
+        "_target_": "cambrian.envs.done_fns.done_if_close_to_agents",
+        "_partial_": true,
+        "for_agents": [
+          "agent"
+        ],
+        "to_agents": [
+          "adversary0"
+        ],
+        "distance_threshold": 1.0
+      },
+      "detail": "Training must retain the original agent-to-adversary failure event; an empty to_agents list silently disables the event even without disable=true.",
+      "required": true
+    },
+    {
+      "name": "task.no_added_done_events",
+      "status": "pass",
+      "expected": {
+        "termination": [],
+        "truncation": []
+      },
+      "actual": {
+        "termination": [],
+        "truncation": []
+      },
+      "detail": "Contact failure or other added done events change the original tracking problem even when the reward table looks similar.",
+      "required": true
+    },
+    {
+      "name": "task.eval_respawns_goal_and_adversary",
+      "status": "pass",
+      "expected": {
+        "for_agents": [
+          "goal0",
+          "adversary0"
+        ],
+        "to_agents": [
+          "agent"
+        ],
+        "distance_threshold": 1.0
+      },
+      "actual": {
+        "_target_": "cambrian.envs.step_fns.step_respawn_agents_if_close_to_agents",
+        "_partial_": true,
+        "for_agents": [
+          "goal0",
+          "adversary0"
+        ],
+        "to_agents": [
+          "agent"
+        ],
+        "distance_threshold": 1.0
+      },
+      "detail": "Evaluation should score repeated target contacts and adversary contacts.",
+      "required": true
+    },
+    {
+      "name": "task.eval_goal_reward_enabled",
+      "status": "pass",
+      "expected": {
+        "enabled": true,
+        "for_agents": [
+          "goal0"
+        ],
+        "reward": 10.0,
+        "scale_by_quickness": true
+      },
+      "actual": {
+        "_target_": "cambrian.envs.reward_fns.reward_fn_agent_respawned",
+        "_partial_": true,
+        "reward": 10.0,
+        "for_agents": [
+          "goal0"
+        ],
+        "scale_by_quickness": true
+      },
+      "detail": "The repeated-contact evaluation must retain the original target score.",
+      "required": true
+    },
+    {
+      "name": "task.eval_adversary_penalty_enabled",
+      "status": "pass",
+      "expected": {
+        "enabled": true,
+        "for_agents": [
+          "adversary0"
+        ],
+        "reward": -20.0,
+        "scale_by_quickness": true
+      },
+      "actual": {
+        "_target_": "cambrian.envs.reward_fns.reward_fn_agent_respawned",
+        "_partial_": true,
+        "reward": -20.0,
+        "for_agents": [
+          "adversary0"
+        ],
+        "scale_by_quickness": true
+      },
+      "detail": "Removing or weakening this term converts evaluation into goal-only pursuit.",
+      "required": true
+    },
+    {
+      "name": "task.original_training_reward_values",
+      "status": "pass",
+      "expected": {
+        "reward_if_done": {
+          "termination_reward": 1.0,
+          "truncation_reward": -1.0,
+          "scale_by_quickness": true,
+          "disable_on_max_episode_steps": true,
+          "for_agents": [
+            "agent"
+          ]
+        },
+        "penalize_if_has_contacts": {
+          "reward": -1.0,
+          "for_agents": [
+            "agent"
+          ]
+        }
+      },
+      "actual": {
+        "reward_if_done": {
+          "_target_": "cambrian.envs.reward_fns.reward_fn_done",
+          "_partial_": true,
+          "scale_by_quickness": true,
+          "termination_reward": 1.0,
+          "truncation_reward": -1.0,
+          "disable_on_max_episode_steps": true,
+          "for_agents": [
+            "agent"
+          ]
+        },
+        "penalize_if_has_contacts": {
+          "_target_": "cambrian.envs.reward_fns.reward_fn_has_contacts",
+          "_partial_": true,
+          "reward": -1.0,
+          "for_agents": [
+            "agent"
+          ]
+        }
+      },
+      "detail": "The final baseline is the upstream tracking objective, not a rescaled or shaped proxy.",
+      "required": true
+    },
+    {
+      "name": "task.no_added_reward_shaping",
+      "status": "fail",
+      "expected": [],
+      "actual": [
+        "euclidean_delta_to_goal"
+      ],
+      "detail": "Approach, heading, action-alignment, time, or respawn shaping changes the scientific task and should not be in the canonical baseline.",
+      "required": true
+    },
+    {
+      "name": "policy.recurrent_model",
+      "status": "pass",
+      "expected": "MjCambrianRecurrentModel + cyclopean LSTM policy",
+      "actual": {
+        "_target_": "cambrian.ml.model.MjCambrianRecurrentModel",
+        "policy": "CyclopeanMultiInputLstmPolicy"
+      },
+      "detail": "The requested PPO baseline must use recurrent sequence training.",
+      "required": true
+    },
+    {
+      "name": "policy.spatiotemporal_stack_enabled",
+      "status": "pass",
+      "expected": {
+        "stack_size": ">= 3"
+      },
+      "actual": {
+        "_target_": "gymnasium.wrappers.FrameStackObservation",
+        "_partial_": true,
+        "stack_size": 10,
+        "padding_type": "zero"
+      },
+      "detail": "The R(2+1)D retina requires an explicit temporal stack. The LSTM adds persistent state rather than replacing local retinal motion input.",
+      "required": true
+    },
+    {
+      "name": "policy.no_constant_actions",
+      "status": "pass",
+      "expected": "no fixed action dimensions",
+      "actual": {},
+      "detail": "Fixing body speed changes the control problem and action dimensionality.",
+      "required": true
+    },
+    {
+      "name": "vision.exactly_two_eyes",
+      "status": "pass",
+      "expected": 2,
+      "actual": {
+        "num_eyes": [
+          1,
+          2
+        ],
+        "product": 2
+      },
+      "detail": "The canonical baseline must be binocular, not three-eye or monocular.",
+      "required": true
+    },
+    {
+      "name": "vision.eyes_actuated",
+      "status": "pass",
+      "expected": true,
+      "actual": true,
+      "detail": "The policy must control pan and tilt for both eyes.",
+      "required": true
+    },
+    {
+      "name": "vision.independent_eye_actions",
+      "status": "pass",
+      "expected": "independent",
+      "actual": "independent",
+      "detail": "Independent mode exposes four eye commands (left/right pan/tilt).",
+      "required": true
+    },
+    {
+      "name": "vision.action_efference_copy_enabled",
+      "status": "pass",
+      "expected": true,
+      "actual": true,
+      "detail": "The recurrent controller should observe its previous policy-space command.",
+      "required": true
+    },
+    {
+      "name": "vision.eye_state_enabled",
+      "status": "pass",
+      "expected": true,
+      "actual": true,
+      "detail": "Actuated-eye proprioception is needed to interpret retinal direction.",
+      "required": true
+    },
+    {
+      "name": "vision.matched_retinal_geometry_config",
+      "status": "pass",
+      "expected": {
+        "resolution": [
+          20,
+          30
+        ],
+        "fov": [
+          45.0,
+          67.5
+        ],
+        "lon_range": [
+          -18.75,
+          18.75
+        ],
+        "gaze_lon_range": [
+          -18.75,
+          18.75
+        ]
+      },
+      "actual": {
+        "resolution": [
+          20,
+          30
+        ],
+        "fov": [
+          45.0,
+          67.5
+        ],
+        "lon_range": [
+          -18.75,
+          18.75
+        ],
+        "gaze_lon_range": [
+          -18.75,
+          18.75
+        ]
+      },
+      "detail": "This two-eye design matches the original three-eye pixel count, angular sampling, union coverage, and total overlap.",
+      "required": true
+    },
+    {
+      "name": "vision.sensor_manipulations_disabled",
+      "status": "pass",
+      "expected": {
+        "noise_std": 0.0,
+        "integration_factor": 0.0
+      },
+      "actual": {
+        "noise_std": 0.0,
+        "integration_factor": 0.0
+      },
+      "detail": "Sensor hypotheses must be introduced only after the clean baseline works.",
+      "required": true
+    },
+    {
+      "name": "artifact.compiled_xml_present",
+      "status": "pass",
+      "expected": "/home/jake/repos/ACI/logs/2026-06-24/actuated-2eye-rppo_cyclopean_lstm_seed0_nenv8_20260624_095910/compiled_env.xml",
+      "actual": "/home/jake/repos/ACI/logs/2026-06-24/actuated-2eye-rppo_cyclopean_lstm_seed0_nenv8_20260624_095910/compiled_env.xml",
+      "detail": "Checking compiled geometry rather than intended Hydra values.",
+      "required": true
+    },
+    {
+      "name": "compiled.exactly_two_eye_cameras",
+      "status": "pass",
+      "expected": 2,
+      "actual": [
+        "agent_eye_0_0",
+        "agent_eye_0_1"
+      ],
+      "detail": "The compiled model is the source of truth for camera count.",
+      "required": true
+    },
+    {
+      "name": "compiled.zero_action_camera_yaw",
+      "status": "pass",
+      "expected": [
+        -18.75,
+        18.75
+      ],
+      "actual": [
+        -18.74995267636092,
+        18.74995267636092
+      ],
+      "detail": "Eye mount placement alone is insufficient: the optical axes must point outward at the matched baseline pose.",
+      "required": true
+    },
+    {
+      "name": "compiled.retinal_resolution",
+      "status": "pass",
+      "expected": [
+        30,
+        20
+      ],
+      "actual": [
+        [
+          30,
+          20
+        ],
+        [
+          30,
+          20
+        ]
+      ],
+      "detail": "Two 20x30 retinas preserve the original total pixel count.",
+      "required": true
+    },
+    {
+      "name": "compiled.retinal_fov",
+      "status": "pass",
+      "expected": {
+        "fov_deg": [
+          45.0,
+          67.5
+        ],
+        "sensorsize": [
+          0.008284271247461903,
+          0.013363180779263536
+        ]
+      },
+      "actual": [
+        {
+          "name": "agent_eye_0_0",
+          "fov_deg": [
+            44.99999389928658,
+            67.50010790658736
+          ],
+          "sensorsize": [
+            0.00828427,
+            0.0133636
+          ]
+        },
+        {
+          "name": "agent_eye_0_1",
+          "fov_deg": [
+            44.99999389928658,
+            67.50010790658736
+          ],
+          "sensorsize": [
+            0.00828427,
+            0.0133636
+          ]
+        }
+      ],
+      "detail": "FOV is recomputed from compiled focal length and sensor size.",
+      "required": true
+    },
+    {
+      "name": "compiled.four_eye_actuators",
+      "status": "pass",
+      "expected": 4,
+      "actual": [
+        "agent_eye_0_0_pan_act",
+        "agent_eye_0_0_tilt_act",
+        "agent_eye_0_1_pan_act",
+        "agent_eye_0_1_tilt_act"
+      ],
+      "detail": "Independent binocular pan/tilt control requires four compiled actuators.",
+      "required": true
+    },
+    {
+      "name": "compiled.goal_and_adversary_bodies",
+      "status": "pass",
+      "expected": "at least one goal* body and one adversary* body",
+      "actual": {
+        "goals": [
+          "goal0_body"
+        ],
+        "adversaries": [
+          "adversary0_body"
+        ]
+      },
+      "detail": "This catches config/run disagreement and goal-only compiled mazes.",
+      "required": true
+    },
+    {
+      "name": "checkpoint.sb3_archive_present",
+      "status": "pass",
+      "expected": "/home/jake/repos/ACI/logs/2026-06-24/actuated-2eye-rppo_cyclopean_lstm_seed0_nenv8_20260624_095910/best_model.zip",
+      "actual": "/home/jake/repos/ACI/logs/2026-06-24/actuated-2eye-rppo_cyclopean_lstm_seed0_nenv8_20260624_095910/best_model.zip",
+      "detail": "Inspecting the serialized observation declaration and weight shapes.",
+      "required": false
+    },
+    {
+      "name": "checkpoint.two_eye_observation_tensors",
+      "status": "pass",
+      "expected": 2,
+      "actual": {
+        "agent_eye_0_0": [
+          10,
+          20,
+          30,
+          3
+        ],
+        "agent_eye_0_1": [
+          10,
+          20,
+          30,
+          3
+        ]
+      },
+      "detail": "The saved policy should expose one image tensor per eye.",
+      "required": true
+    },
+    {
+      "name": "checkpoint.cnn_channel_axis",
+      "status": "pass",
+      "expected": {
+        "retinal_channels": [
+          3
+        ]
+      },
+      "actual": {
+        "first_conv_in_channels": [
+          3
+        ],
+        "example_weights": [
+          {
+            "name": "features_extractor.retinal_encoder.spatial_stem.0.weight",
+            "shape": [
+              24,
+              3,
+              1,
+              5,
+              5
+            ]
+          },
+          {
+            "name": "pi_features_extractor.retinal_encoder.spatial_stem.0.weight",
+            "shape": [
+              24,
+              3,
+              1,
+              5,
+              5
+            ]
+          },
+          {
+            "name": "vf_features_extractor.retinal_encoder.spatial_stem.0.weight",
+            "shape": [
+              24,
+              3,
+              1,
+              5,
+              5
+            ]
+          }
+        ]
+      },
+      "detail": "A retinal tensor must enter Conv2d/Conv3d with 3 channels. Twenty input channels means height was silently interpreted as channels.",
+      "required": true
+    }
+  ]
+}

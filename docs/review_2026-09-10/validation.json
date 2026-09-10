@@ -1,0 +1,56 @@
+{
+  "date": "2026-09-10",
+  "source_commit": "013645986dd98b8c92128f68458b3efd36de19bf",
+  "source_dirty": true,
+  "tests": {
+    "command": "MUJOCO_GL=egl /home/jake/anaconda3/envs/aci312/bin/python -m pytest -q",
+    "passed": 17,
+    "seconds": 7.06
+  },
+  "git_fsck": {
+    "exit_code": 0,
+    "note": "Dangling objects reported; no corruption found."
+  },
+  "geometry": "ok",
+  "contract": {
+    "passed": 32,
+    "failed": [
+      "task.no_added_reward_shaping"
+    ]
+  },
+  "standard_replay": {
+    "checkpoint": "logs/2026-06-24/actuated-2eye-rppo_cyclopean_lstm_seed0_nenv8_20260624_095910/best_model.zip",
+    "eval_seed": 1000,
+    "episodes": [
+      {
+        "r": "0.0",
+        "l": "256",
+        "t": "4.812749"
+      },
+      {
+        "r": "2.7917442",
+        "l": "256",
+        "t": "8.026856"
+      }
+    ],
+    "video": "/tmp/aci_review_20260910/standard_eval/eval_best.mp4",
+    "note": "Two episodes are a smoke check, not an estimate of robust generalization."
+  },
+  "analyzer": {
+    "status": "failed before sampling",
+    "error": "AttributeError: 'MjCambrianMazeEnv' object has no attribute 'config'",
+    "file": "cambrian/analysis/tracking_behavior.py",
+    "line": 206
+  },
+  "commit_followup": {
+    "tests_passed": 20,
+    "test_seconds": 5.8,
+    "shell_syntax": "passed",
+    "diff_check": "passed",
+    "analyzer_status": "completed",
+    "episodes": 2,
+    "steps_per_episode": 256,
+    "outputs": "/tmp/aci_commit_validation/behavior",
+    "note": "Real-checkpoint integration check only; no metabolism training or fixation-segmentation validation."
+  }
+}
