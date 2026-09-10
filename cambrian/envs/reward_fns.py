@@ -371,6 +371,60 @@ def reward_fn_action(
     return apply_reward_fn(env, agent, reward_fn=calc_reward, **kwargs)
 
 
+def reward_fn_motor_metabolism(
+    env: MjCambrianEnv,
+    agent: MjCambrianAgent,
+    terminated: bool,
+    truncated: bool,
+    info: Dict[str, Any],
+    *,
+    idle_cost: float = 0.0,
+    body_speed_cost: float = 0.0,
+    body_yaw_cost: float = 0.0,
+    eye_cost: float = 0.0,
+    action_power: float = 1.0,
+    **kwargs,
+) -> float:
+    """Metabolic penalty for being alive and moving body/eyes.
+
+    This reward is deliberately expressed in policy-action coordinates so it can be
+    swept independently of the MuJoCo actuator ranges.  It is meant for embodied
+    active-vision experiments where rotating/translating the whole body should be
+    more expensive than moving the eyes.
+
+    Action convention for point-eye agents:
+        ``[forward_speed, body_yaw_rate, left_pan, left_tilt, right_pan, right_tilt]``.
+
+    This experimental proxy penalizes commands, not measured mechanical work.
+    Eye commands are positions: holding an eccentric gaze incurs a cost even when
+    the eye is stationary. ``idle_cost`` applies on every step, regardless of motion.
+
+    A positive cost becomes a negative reward. ``action_power=1`` gives an L1
+    command penalty; ``action_power=2`` gives a quadratic command penalty.
+    """
+
+    def calc_cost() -> float:
+        action = np.asarray(info.get("action", []), dtype=np.float64).reshape(-1)
+        if action.size == 0:
+            action = np.asarray(getattr(agent, "last_action", []), dtype=np.float64)
+            action = action.reshape(-1)
+
+        cost = float(idle_cost)
+        if action.size >= 1:
+            # The point-agent speed action maps [-1, 1] -> [0, 1] physical speed.
+            normalized_speed = float(np.clip((action[0] + 1.0) / 2.0, 0.0, 1.0))
+            cost += float(body_speed_cost) * normalized_speed**action_power
+        if action.size >= 2:
+            body_yaw = float(abs(np.clip(action[1], -1.0, 1.0)))
+            cost += float(body_yaw_cost) * body_yaw**action_power
+        if action.size > 2:
+            eye_actions = np.abs(np.clip(action[2:], -1.0, 1.0))
+            cost += float(eye_cost) * float(np.sum(eye_actions**action_power))
+        return -cost
+
+    return apply_reward_fn(env, agent, reward_fn=calc_cost, **kwargs)
+
+
 def reward_combined(
     env: MjCambrianEnv,
     agent: MjCambrianAgent,

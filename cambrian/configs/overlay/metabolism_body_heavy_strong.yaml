@@ -1,0 +1,28 @@
+# @package _global_
+
+# Strong embodied metabolism: useful for testing whether policies switch from
+# lighthouse-like body scanning toward cheaper ocular scanning.
+
+env:
+  reward_fn:
+    motor_metabolism:
+      _target_: cambrian.envs.reward_fns.reward_fn_motor_metabolism
+      _partial_: true
+      idle_cost: 0.002
+      body_speed_cost: 0.005
+      body_yaw_cost: 0.020
+      eye_cost: 0.002
+      action_power: 1.0
+      for_agents: ${glob:agent*,${oc.dict.keys:env.agents}}
+
+eval_env:
+  reward_fn:
+    motor_metabolism:
+      _target_: cambrian.envs.reward_fns.reward_fn_motor_metabolism
+      _partial_: true
+      idle_cost: ${env.reward_fn.motor_metabolism.idle_cost}
+      body_speed_cost: ${env.reward_fn.motor_metabolism.body_speed_cost}
+      body_yaw_cost: ${env.reward_fn.motor_metabolism.body_yaw_cost}
+      eye_cost: ${env.reward_fn.motor_metabolism.eye_cost}
+      action_power: ${env.reward_fn.motor_metabolism.action_power}
+      for_agents: ${glob:agent*,${oc.dict.keys:env.agents}}

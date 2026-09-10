@@ -1,0 +1,28 @@
+# @package _global_
+
+# Weak embodied metabolism: sitting costs a little, moving the body costs more than
+# moving the eyes. Coefficients are per policy step in normalized action units.
+
+env:
+  reward_fn:
+    motor_metabolism:
+      _target_: cambrian.envs.reward_fns.reward_fn_motor_metabolism
+      _partial_: true
+      idle_cost: 0.001
+      body_speed_cost: 0.002
+      body_yaw_cost: 0.006
+      eye_cost: 0.001
+      action_power: 1.0
+      for_agents: ${glob:agent*,${oc.dict.keys:env.agents}}
+
+eval_env:
+  reward_fn:
+    motor_metabolism:
+      _target_: cambrian.envs.reward_fns.reward_fn_motor_metabolism
+      _partial_: true
+      idle_cost: ${env.reward_fn.motor_metabolism.idle_cost}
+      body_speed_cost: ${env.reward_fn.motor_metabolism.body_speed_cost}
+      body_yaw_cost: ${env.reward_fn.motor_metabolism.body_yaw_cost}
+      eye_cost: ${env.reward_fn.motor_metabolism.eye_cost}
+      action_power: ${env.reward_fn.motor_metabolism.action_power}
+      for_agents: ${glob:agent*,${oc.dict.keys:env.agents}}

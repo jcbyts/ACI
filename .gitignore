@@ -198,3 +198,7 @@ cython_debug/
 
 # Training run output (checkpoints, videos, eval npz, compiled env/config)
 logs/
+
+# Local transfer patches and backup; implementations are versioned directly.
+/ACI_*.patch
+/cambrian/utils/wrappers.py.bak_recursive_info

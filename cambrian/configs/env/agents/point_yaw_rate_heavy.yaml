@@ -1,0 +1,7 @@
+defaults:
+  - point_yaw_rate
+
+xml:
+  _target_: cambrian.utils.cambrian_xml.MjCambrianXML.parse
+  _convert_: all
+  xml_string: ${read:${path:${package:},models,agents,point_yaw_rate_heavy.xml}}
